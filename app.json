@@ -1,0 +1,58 @@
+{
+  "expo": {
+    "name": "VEGA Home Services",
+    "slug": "vega-home-services",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#FDF6EE"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#FDF6EE"
+      },
+      "package": "com.vegavizag.app",
+      "googleServicesFile": "./google-services.json"
+    },
+    "ios": {
+      "bundleIdentifier": "com.vegavizag.app",
+      "googleServicesFile": "./GoogleService-Info.plist"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "a2cb81a3-7b99-49f5-9ec4-6ace8e81d762"
+      }
+    },
+    "owner": "mahesh1331",
+    "plugins": [
+      "@react-native-firebase/app",
+      "@react-native-firebase/auth",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "compileSdkVersion": 34,
+            "targetSdkVersion": 34,
+            "minSdkVersion": 24,
+            "enableProguardInReleaseBuilds": false
+          },
+          "ios": {
+            "useFrameworks": "static"
+          }
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/notification-icon.png",
+          "color": "#C8541A"
+        }
+      ]
+    ]
+  }
+}
