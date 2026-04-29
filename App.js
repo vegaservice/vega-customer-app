@@ -686,7 +686,7 @@ export default function App() {
 
   const placeOrder = async()=>{
     if(!user){Alert.alert('Login Required','',[ {text:'Login',onPress:()=>setScreen('login')} ]);return;}
-    if(!flat.trim()){Alert.alert('Address Required','Enter your flat / house number');return;}
+    // flat optional for testing
     if((bookMode==='scheduled'||bookMode==='recurring')&&!selTime){Alert.alert('Time Required','Please select a time slot for your booking');return;}
     if(cart.length===0){Alert.alert('Cart Empty','Please add a service first');return;}
     setPlacing(true);
@@ -1306,6 +1306,59 @@ export default function App() {
               {useWallet&&<Text style={{color:'#FFF',fontSize:14,fontWeight:'800'}}>✓</Text>}
             </View>
           </TouchableOpacity>
+          {/* ✅ BOOKING MODE — always visible on step4 so user can switch anytime */}
+          <Card style={{marginBottom:12}}>
+            <Text style={{fontWeight:'700',color:C.text,fontSize:14,marginBottom:12}}>⏰ When do you need this?</Text>
+            <View style={{flexDirection:'row',backgroundColor:C.bg,borderRadius:14,padding:3,marginBottom:12}}>
+              {[{id:'instant',label:'⚡ Now'},{id:'scheduled',label:'📅 Later'},{id:'recurring',label:'🔄 Repeat'}].map(m=>(
+                <TouchableOpacity key={m.id} style={{flex:1,paddingVertical:10,borderRadius:11,alignItems:'center',backgroundColor:bookMode===m.id?C.orange:'transparent',...(bookMode===m.id?SHADOW.glow:{})}} onPress={()=>{setBookMode(m.id);setSelTime(null);}}>
+                  <Text style={{fontSize:11,fontWeight:'700',color:bookMode===m.id?'#FFF':C.muted}}>{m.label}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            {bookMode==='instant'&&(
+              <View style={{backgroundColor:C.greenBg,borderRadius:12,padding:10,flexDirection:'row',alignItems:'center',gap:8,borderWidth:0.5,borderColor:C.greenBd}}>
+                <Text style={{fontSize:16}}>⚡</Text>
+                <Text style={{color:C.green,fontWeight:'600',fontSize:12}}>Professional arrives in 30–45 minutes</Text>
+              </View>
+            )}
+            {bookMode==='recurring'&&(
+              <View style={{marginBottom:10}}>
+                <Text style={{fontSize:12,fontWeight:'600',color:C.muted,marginBottom:8}}>Repeat frequency:</Text>
+                <View style={{flexDirection:'row',gap:8}}>
+                  {['Weekly','Biweekly','Monthly'].map((opt)=>(
+                    <TouchableOpacity key={opt} onPress={()=>setRecurFreq(opt)}
+                      style={{paddingHorizontal:14,paddingVertical:7,borderRadius:20,backgroundColor:recurFreq===opt?C.gold:C.card,borderWidth:0.5,borderColor:C.goldBd}}>
+                      <Text style={{color:recurFreq===opt?'#FFF':C.gold,fontSize:12,fontWeight:'700'}}>{opt}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+            )}
+            {(bookMode==='scheduled'||bookMode==='recurring')&&(
+              <>
+                <Text style={{fontSize:13,fontWeight:'700',color:C.text,marginBottom:10,marginTop:4}}>Select Date</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{marginBottom:14}}>
+                  {DATES.map((d,i)=>(
+                    <TouchableOpacity key={i} style={{marginRight:8,width:62,paddingVertical:12,borderRadius:16,alignItems:'center',backgroundColor:selDate===i?C.orange:C.card,borderWidth:0.5,borderColor:selDate===i?C.orange:C.border2,...(selDate===i?SHADOW.glow:{})}} onPress={()=>setSelDate(i)}>
+                      <Text style={{fontSize:9,color:selDate===i?'rgba(255,255,255,0.8)':C.muted,fontWeight:'600'}}>{d.label}</Text>
+                      <DText style={{fontSize:20,fontWeight:'700',color:selDate===i?'#FFF':C.text,marginTop:2}}>{d.num}</DText>
+                      <Text style={{fontSize:9,color:selDate===i?'rgba(255,255,255,0.7)':C.muted}}>{d.mon}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+                <Text style={{fontSize:13,fontWeight:'700',color:C.text,marginBottom:10}}>Select Time</Text>
+                <View style={{flexDirection:'row',flexWrap:'wrap',gap:8}}>
+                  {TIMES.map((t,i)=>(
+                    <TouchableOpacity key={i} style={{paddingHorizontal:12,paddingVertical:9,borderRadius:18,backgroundColor:selTime===t?C.orange:C.card,borderWidth:0.5,borderColor:selTime===t?C.orange:C.border2,...(selTime===t?SHADOW.glow:{})}} onPress={()=>setSelTime(t)}>
+                      <Text style={{fontSize:12,fontWeight:'600',color:selTime===t?'#FFF':C.text2}}>{t}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+                {!selTime&&<Text style={{color:C.red,fontSize:11,marginTop:8}}>⚠️ Please select a time to continue</Text>}
+              </>
+            )}
+          </Card>
           <Card style={{marginBottom:12}}>
             <Text style={{fontWeight:'700',color:C.text,fontSize:14,marginBottom:12}}>Bill Details</Text>
             {cart.map((i,idx)=><BR key={idx} l={i.name} r={`₹${i.price}`}/>)}
@@ -1330,7 +1383,7 @@ export default function App() {
               </TouchableOpacity>
             ))}
           </Card>
-          <TouchableOpacity style={[S.btn,{paddingVertical:18,borderRadius:30,...SHADOW.glow},(!flat.trim()||placing)&&{opacity:0.4}]} disabled={!flat.trim()||placing} onPress={placeOrder}>
+          <TouchableOpacity style={[S.btn,{paddingVertical:18,borderRadius:30,...SHADOW.glow},placing&&{opacity:0.4}]} disabled={placing} onPress={placeOrder}>
             {placing?<ActivityIndicator color="#FFF"/>:<Text style={[S.btnT,{fontSize:17}]}>🔒 Confirm Booking — ₹{finalTotal}</Text>}
           </TouchableOpacity>
           <View style={{height:40}}/>
