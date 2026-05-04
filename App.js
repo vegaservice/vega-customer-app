@@ -708,7 +708,7 @@ export default function App() {
       setTimeout(()=>{
         const otp=Math.floor(1000+Math.random()*9000).toString();
         const oid='VG'+Date.now().toString().slice(-6);
-        const o={orderId:oid,otp,items:[...cart],total:finalTotal,slot,addr:fullAddr,status:'Confirmed',time:new Date().toLocaleString('en-IN'),professional:pro,rated:false,bookingMode,recurFreq:bookMode==='recurring'?(recurFreq||'Weekly'):null};
+        const o={orderId:oid,otp,items:[...cart],total:finalTotal,slot,addr:fullAddr,status:'Confirmed',time:new Date().toLocaleString('en-IN'),professional:pro,rated:false,bookingMode:bookMode,recurFreq:bookMode==='recurring'?(recurFreq||'Weekly'):null};
         setOrders(p=>[o,...p]);
         if(useWallet&&walletSave>0) setWallet(w=>w-walletSave);
         resetForm();
@@ -720,11 +720,30 @@ export default function App() {
     }
 
     // Production path — save to Firestore
+    const bookingMode = bookMode; // alias for Firestore field
     try{
+      // Fetch best available worker
+      let pro = PROFESSIONALS[Math.floor(Math.random()*PROFESSIONALS.length)];
+      try {
+        const wSnap = await firestore().collection('workers')
+          .where('isAvailable','==',true)
+          .where('status','==','active')
+          .where('role','==','worker')
+          .limit(3).get();
+        if(!wSnap.empty) {
+          const ws = wSnap.docs.map(d=>({id:d.id,...d.data()}));
+          const best = ws.sort((a,b)=>(b.ratingAvg||4)-(a.ratingAvg||4))[0];
+          pro = {id:best.id,name:best.name,phone:best.phone,rating:best.ratingAvg||4.9,initial:(best.name||'V')[0],color:'#C8541A',badge:'VEGA Pro'};
+        }
+      } catch(e){ console.log('Worker fetch:',e); }
+
       const bookingData = {
         userId: phone,
         userName: user.name,
         userPhone: phone,
+        assignedWorkerId: pro.id||null,
+        assignedWorkerName: pro.name||null,
+        assignedWorkerPhone: pro.phone||null,
         items: cart,
         subtotal: totalPrice,
         total: finalTotal,
@@ -764,7 +783,7 @@ export default function App() {
         time: new Date().toLocaleString('en-IN'),
         professional: pro,
         rated: false,
-        bookingMode,
+        bookingMode: bookMode,
         recurFreq: bookMode==='recurring'?(recurFreq||'Weekly'):null,
       };
 
