@@ -65,16 +65,48 @@ const createBooking = async (bookingData) => {
     const orderId = 'VG' + Date.now().toString().slice(-6);
     const otp = Math.floor(1000 + Math.random() * 9000).toString();
     const booking = {
-      ...bookingData, orderId, otp, status: 'confirmed',  // ← snake_case
+      ...bookingData, orderId, otp, status: 'confirmed',
       createdAt: firestore.FieldValue.serverTimestamp(), rated: false,
     };
     await firestore().collection('bookings').doc(orderId).set(booking);
-    // Also add to user's booking subcollection
     if (bookingData.userId) {
       await firestore().collection('users').doc(bookingData.userId)
         .collection('bookings').doc(orderId)
         .set({ orderId, status: 'confirmed', createdAt: firestore.FieldValue.serverTimestamp() });
     }
+
+    // ── RECURRING BOOKINGS — create future occurrences in Firestore
+    if (bookingData.bookingMode === 'recurring' && bookingData.recurFreq && bookingData.scheduledDate) {
+      const freqDays = { 'Weekly': 7, 'Biweekly': 14, 'Monthly': 30 };
+      const days = freqDays[bookingData.recurFreq] || 7;
+      const occurrences = bookingData.recurFreq === 'Monthly' ? 3 : 4; // 4 weeks or 3 months ahead
+      const baseDate = new Date(bookingData.scheduledDate);
+
+      const batch = firestore().batch();
+      for (let i = 1; i <= occurrences; i++) {
+        const nextDate = new Date(baseDate);
+        nextDate.setDate(baseDate.getDate() + (days * i));
+        const nextDateStr = nextDate.toISOString().split('T')[0];
+        const nextOrderId = 'VG' + (Date.now() + i * 1000).toString().slice(-6);
+        const nextSlot = `Every ${bookingData.recurFreq} · ${nextDate.toLocaleDateString('en-IN', { weekday:'short', day:'numeric', month:'short' })} at ${bookingData.scheduledTime}`;
+        const nextRef = firestore().collection('bookings').doc(nextOrderId);
+        batch.set(nextRef, {
+          ...bookingData,
+          orderId: nextOrderId,
+          otp: Math.floor(1000 + Math.random() * 9000).toString(),
+          status: 'confirmed',
+          scheduledDate: nextDateStr,
+          slot: nextSlot,
+          parentOrderId: orderId, // links to first booking
+          isRecurringChild: true,
+          recurIndex: i,
+          createdAt: firestore.FieldValue.serverTimestamp(),
+          rated: false,
+        });
+      }
+      await batch.commit();
+    }
+
     return { success: true, orderId, otp, booking };
   } catch (e) { console.error('createBooking:', e); return { success: false, error: e.message }; }
 };
@@ -806,6 +838,11 @@ export default function App() {
         slot,
         bookingMode: bookMode,
         recurFreq: bookMode==='recurring'?(recurFreq||'Weekly'):null,
+        // ← scheduledDate and scheduledTime needed for recurring occurrences
+        scheduledDate: (bookMode==='scheduled'||bookMode==='recurring') && selDate !== null
+          ? `${new Date().getFullYear()}-${String(new Date().getMonth()+1).padStart(2,'0')}-${String(DATES[selDate]?.num||new Date().getDate()).padStart(2,'0')}`
+          : null,
+        scheduledTime: selTime||null,
         address: {
           flat, buildingName, streetName, landmark,
           area: selArea, city: 'Visakhapatnam',
@@ -1301,11 +1338,12 @@ export default function App() {
           </View>
         </Modal>
         <ScrollView style={{flex:1,padding:16}} keyboardShouldPersistTaps="handled">
-          {/* ✅ REAL MAP — Google Maps Static API */}
+          {/* ✅ REAL MAP — updates when area or building changes */}
           <Card style={{marginBottom:16,padding:0,overflow:'hidden'}}>
             <View style={{height:150,overflow:'hidden',position:'relative'}}>
               <Image
-                source={{ uri: (buildingName||selArea) ? getMapUrl(selArea,buildingName) : DEFAULT_MAP_URL }}
+                key={`map_${selArea}_${buildingName}`}
+                source={{ uri: getMapUrl(selArea, buildingName) }}
                 style={{width:'100%',height:150}}
                 resizeMode="cover"
               />
@@ -2119,7 +2157,17 @@ export default function App() {
               ))}
               <View style={{height:1,backgroundColor:C.border,marginVertical:10}}/>
               <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center'}}>
-                <Text style={{color:C.muted,fontSize:12}}>📅 {o.slot?.split(',')[0]||o.slot}</Text>
+                <View style={{flex:1,gap:4}}>
+                  <Text style={{color:C.muted,fontSize:12}}>📅 {o.slot?.split(',')[0]||o.slot}</Text>
+                  {o.bookingMode==='recurring'&&o.recurFreq&&(
+                    <View style={{flexDirection:'row',alignItems:'center',gap:4}}>
+                      <View style={{backgroundColor:C.goldBg,paddingHorizontal:8,paddingVertical:3,borderRadius:10,borderWidth:0.5,borderColor:C.goldBd}}>
+                        <Text style={{color:C.gold,fontSize:11,fontWeight:'700'}}>🔄 {o.recurFreq}</Text>
+                      </View>
+                      {o.isRecurringChild&&<Text style={{color:C.muted,fontSize:10}}>#{o.recurIndex+1}</Text>}
+                    </View>
+                  )}
+                </View>
                 <View style={{flexDirection:'row',alignItems:'center',gap:8}}>
                   <DText style={{color:C.orange,fontWeight:'700',fontSize:16}}>₹{o.total}</DText>
                   {!o.rated&&(
