@@ -21,7 +21,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
   StatusBar, ScrollView, Alert, SafeAreaView, Dimensions,
-  Animated, Modal, ActivityIndicator, Platform,
+  Animated, Modal, ActivityIndicator, Platform, Image,
 } from 'react-native';
 
 // ── FONT SETUP ────────────────────────────────────────────────────
@@ -65,7 +65,7 @@ const createBooking = async (bookingData) => {
     const orderId = 'VG' + Date.now().toString().slice(-6);
     const otp = Math.floor(1000 + Math.random() * 9000).toString();
     const booking = {
-      ...bookingData, orderId, otp, status: 'Confirmed',
+      ...bookingData, orderId, otp, status: 'confirmed',  // ← snake_case to match Worker + HubManager
       createdAt: firestore.FieldValue.serverTimestamp(), rated: false,
     };
     await firestore().collection('bookings').doc(orderId).set(booking);
@@ -73,7 +73,7 @@ const createBooking = async (bookingData) => {
     if (bookingData.userId) {
       await firestore().collection('users').doc(bookingData.userId)
         .collection('bookings').doc(orderId)
-        .set({ orderId, status: 'Confirmed', createdAt: firestore.FieldValue.serverTimestamp() });
+        .set({ orderId, status: 'confirmed', createdAt: firestore.FieldValue.serverTimestamp() });
     }
     return { success: true, orderId, otp, booking };
   } catch (e) { console.error('createBooking:', e); return { success: false, error: e.message }; }
@@ -109,7 +109,42 @@ const listenToBooking = (orderId, callback) => {
     .onSnapshot(doc => { if (doc.exists) callback({ id: doc.id, ...doc.data() }); });
 };
 
-const DEMO_MODE = false;  // 🚀 PRODUCTION — Firebase active
+// ── TEST PHONE NUMBERS — Firebase bypasses reCaptcha for these (no browser redirect)
+const TEST_PHONES = ['9999999999','7777777701','9999999998','9133222344','1111111111'];
+// Add these in Firebase Console → Authentication → Phone → Phone numbers for testing
+// OTP for all test numbers: 123456
+
+// ── GOOGLE MAPS STATIC API — Issue 9 Fix
+// Get free API key: console.cloud.google.com → Enable "Maps Static API" → Create Key
+const MAPS_API_KEY = 'AIzaSyDIQw9tYW5x2NMHZWEIsMlsYkwdxYUbilU';
+
+const getMapUrl = (area, building) => {
+  const location = encodeURIComponent(
+    `${building ? building + ', ' : ''}${area}, Visakhapatnam, Andhra Pradesh, India`
+  );
+  return (
+    `https://maps.googleapis.com/maps/api/staticmap?` +
+    `center=${location}` +
+    `&zoom=16` +
+    `&size=600x240` +
+    `&scale=2` +
+    `&maptype=roadmap` +
+    `&markers=color:0xE8520A%7Clabel:V%7C${location}` +
+    `&style=feature:poi%7Cvisibility:off` +
+    `&style=feature:transit%7Cvisibility:off` +
+    `&key=${MAPS_API_KEY}`
+  );
+};
+
+const DEFAULT_MAP_URL = (
+  `https://maps.googleapis.com/maps/api/staticmap?` +
+  `center=Madhurawada,Visakhapatnam,AP,India` +
+  `&zoom=14&size=600x240&scale=2&maptype=roadmap` +
+  `&markers=color:0xE8520A%7CMadhurawada,Visakhapatnam` +
+  `&key=${MAPS_API_KEY}`
+);
+
+
 const { width: W, height: H } = Dimensions.get('window');
 const COL = (W - 48) / 4;
 
@@ -207,6 +242,40 @@ const PROFESSIONALS = [
   {id:'p4',name:'Sunitha Naidu', rating:4.7,jobs:156,exp:'1 yr', badge:'Verified',  initial:'S',color:'#183880'},
   {id:'p5',name:'Meena Kumari',  rating:5.0,jobs:98, exp:'4 yrs',badge:'Elite Pro', initial:'M',color:'#B02818'},
 ];
+
+// ══════════════════════════════════════════════════════
+// SERVICE ICONS — Professional PNG icons via CDN
+// Using icons8.com CDN — free, reliable, high quality
+// ══════════════════════════════════════════════════════
+const SVC_ICONS = {
+  home:     'https://img.icons8.com/fluency/96/broom.png',
+  bathroom: 'https://img.icons8.com/fluency/96/bathroom.png',
+  kitchen:  'https://img.icons8.com/fluency/96/stove.png',
+  car:      'https://img.icons8.com/fluency/96/car-wash.png',
+  sofa:     'https://img.icons8.com/fluency/96/sofa.png',
+  beauty:   'https://img.icons8.com/fluency/96/beauty.png',
+  deep:     'https://img.icons8.com/fluency/96/vacuum-cleaner.png',
+  elder:    'https://img.icons8.com/fluency/96/elderly-person.png',
+  cook:     'https://img.icons8.com/fluency/96/cooking-pot.png',
+  repair:   'https://img.icons8.com/fluency/96/maintenance.png',
+};
+
+// Icon component — shows image with fallback to emoji
+const SvcIcon = ({ id, emoji, size = 40, style }) => {
+  const [imgErr, setImgErr] = React.useState(false);
+  const uri = SVC_ICONS[id];
+  if (!uri || imgErr) {
+    return <Text style={{ fontSize: size * 0.75, lineHeight: size, ...style }}>{emoji}</Text>;
+  }
+  return (
+    <Image
+      source={{ uri }}
+      style={{ width: size, height: size, ...style }}
+      resizeMode="contain"
+      onError={() => setImgErr(true)}
+    />
+  );
+};
 
 const SERVICES = [
   { id:'home',    name:'Home\nCleaning',  shortName:'Home Cleaning',   icon:'🏠', gradient:['#FF6B35','#C8541A'], shadow:'rgba(200,84,26,0.4)',  iconBg:'#FF8B55', tagline:'Sweeping, mopping & full home clean',       workerLabel:'Cleaners',    badge:'Most Booked',
@@ -449,24 +518,23 @@ const Icon3D = ({ svc, onPress }) => {
     <TouchableOpacity activeOpacity={1} onPress={handlePress} style={{ width:COL, alignItems:'center', marginBottom:20 }}>
       <Animated.View style={{ transform:[{ scale:scaleAnim }], alignItems:'center' }}>
         {/* Drop shadow layer */}
-        <View style={{ width:sz-2, height:sz-2, borderRadius:22, backgroundColor:svc.shadow.replace('0.4)','0.20)'), position:'absolute', top:6, left:2 }}/>
-        {/* Main card */}
+        <View style={{ width:sz-2, height:sz-2, borderRadius:24, backgroundColor:svc.shadow.replace('0.4)','0.15)'), position:'absolute', top:6, left:2 }}/>
+        {/* Main card — white circle with colored bottom border like Pronto */}
         <View style={{
-          width:sz-2, height:sz-2, borderRadius:22,
-          backgroundColor:svc.iconBg,
+          width:sz-2, height:sz-2, borderRadius:24,
+          backgroundColor:'#FFFFFF',
           alignItems:'center', justifyContent:'center',
-          borderBottomWidth:4, borderRightWidth:2,
-          borderBottomColor:svc.gradient[1],
-          borderRightColor:svc.gradient[1]+'80',
-          borderTopWidth:1, borderLeftWidth:1,
-          borderTopColor:'rgba(255,255,255,0.55)',
-          borderLeftColor:'rgba(255,255,255,0.35)',
-          ...SHADOW.soft,
-          shadowColor: svc.gradient[1],
+          borderBottomWidth:4,
+          borderBottomColor:svc.gradient[0],
+          borderWidth:1,
+          borderColor:'rgba(0,0,0,0.06)',
+          ...SHADOW.card,
+          shadowColor: svc.gradient[0],
+          shadowOpacity: 0.25,
+          shadowRadius: 12,
+          elevation: 6,
         }}>
-          {/* Top-left shine */}
-          <View style={{ position:'absolute', top:7, left:7, width:sz*0.44, height:sz*0.32, borderRadius:12, backgroundColor:'rgba(255,255,255,0.28)' }}/>
-          <Text style={{ fontSize:sz*0.42, lineHeight:sz*0.52 }}>{svc.icon}</Text>
+          <SvcIcon id={svc.id} emoji={svc.icon} size={sz*0.52} />
         </View>
         {/* Star badge */}
         {svc.badge && (
@@ -542,6 +610,7 @@ export default function App() {
   const [wallet,        setWallet]        = useState(200);
   const [useWallet,     setUseWallet]     = useState(false);
   const [orders,        setOrders]        = useState([]);
+  const [ordersUnsub,   setOrdersUnsub]   = useState(null);
   const [taskCart,      setTaskCart]      = useState({}); // {taskId: count}
   const [activeTask,    setActiveTask]    = useState(null); // for task detail screen
   const [placing,       setPlacing]       = useState(false);
@@ -620,13 +689,19 @@ export default function App() {
   const sendOTP = async()=>{
     if(!phone||phone.length<10){Alert.alert('Invalid','Please enter a valid 10-digit mobile number');return;}
     setLoading(true);
-    if(DEMO_MODE){setTimeout(()=>{setLoading(false);setScreen('otp');Alert.alert('OTP Sent (Demo)','Use: 123456');},1200);return;}
     try{
+      // Firebase test numbers skip reCaptcha automatically — no browser redirect
+      // Real numbers on EAS APK also have invisible reCaptcha — no browser redirect
+      // Browser redirect only happens on Expo Go with real numbers (not test numbers)
       const confirmation = await auth().signInWithPhoneNumber(`+91${phone}`);
       setConfirm(confirmation);
       setLoading(false);
       setScreen('otp');
-      Alert.alert('OTP Sent ✅',`SMS sent to +91 ${phone}\nPlease enter the 6-digit code`);
+      if(TEST_PHONES.includes(phone)){
+        Alert.alert('OTP Ready ✅',`Test number detected.\nEnter OTP: 123456`);
+      } else {
+        Alert.alert('OTP Sent ✅',`SMS sent to +91 ${phone}\nPlease enter the 6-digit code`);
+      }
     }catch(err){
       setLoading(false);
       console.error('sendOTP error:',err);
@@ -656,9 +731,6 @@ export default function App() {
         finalUser = {name:existingUser.name||uname||'Customer',phone:`+91${phone}`,code:existingUser.referralCode||('VG'+Math.random().toString(36).substr(2,5).toUpperCase()),walletBalance:existingUser.walletBalance||200};
         setUser(finalUser);
         setWallet(existingUser.walletBalance||200);
-        setLoading(false);
-        setScreen('main');setTab('home');
-        Alert.alert('🪷 Welcome back!',`Namaste ${finalUser.name}!`);
       }else{
         // New user — create profile with signup bonus
         const refCode = 'VG'+Math.random().toString(36).substr(2,5).toUpperCase();
@@ -673,10 +745,25 @@ export default function App() {
         });
         setUser(finalUser);
         setWallet(200);
-        setLoading(false);
-        setScreen('main');setTab('home');
-        Alert.alert('🪷 Welcome!',`Namaste ${uname||'Customer'}!\n🎁 ₹200 wallet bonus added!`);
       }
+      // ✅ REAL-TIME ORDERS LISTENER — loads only this customer's bookings live
+      const unsub = firestore()
+        .collection('bookings')
+        .where('customerPhone', '==', phone)
+        .orderBy('createdAt', 'desc')
+        .limit(20)
+        .onSnapshot(
+          snap => {
+            const myOrders = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+            setOrders(myOrders);
+          },
+          err => console.error('orders listener:', err)
+        );
+      // Store unsubscribe for cleanup on logout
+      setOrdersUnsub(() => unsub);
+      setLoading(false);
+      setScreen('main'); setTab('home');
+      Alert.alert('🪷 Welcome' + (existingUser ? ' back' : '') + '!', `Namaste ${finalUser.name}!${!existingUser ? '\n🎁 ₹200 wallet bonus added!' : ''}`);
     }catch(err){
       setLoading(false);
       console.error('verifyOTP error:',err);
@@ -739,6 +826,7 @@ export default function App() {
 
       const bookingData = {
         userId: phone,
+        customerPhone: phone,          // ← CRITICAL: needed for Firestore .where('customerPhone','==') query
         userName: user.name,
         userPhone: phone,
         assignedWorkerId: pro.id||null,
@@ -977,7 +1065,7 @@ export default function App() {
                   <Text style={{color:'rgba(255,255,255,0.95)',fontSize:10,fontWeight:'700',letterSpacing:0.3}}>⭐ {svc.badge}</Text>
                 </View>}
               </View>
-              <Text style={{fontSize:48,marginRight:16}}>{svc.icon}</Text>
+              <SvcIcon id={svc.id} emoji={svc.icon} size={52} style={{marginRight:16}} />
               <View style={{flex:1}}>
                 <DText style={{fontSize:22,fontWeight:'700',color:'#FFF'}}>{svc.shortName}</DText>
                 <Text style={{fontSize:13,color:'rgba(255,255,255,0.85)',marginTop:3,lineHeight:18}}>{svc.tagline}</Text>
@@ -1249,20 +1337,32 @@ export default function App() {
           </View>
         </Modal>
         <ScrollView style={{flex:1,padding:16}} keyboardShouldPersistTaps="handled">
-          {/* Map placeholder */}
+          {/* ✅ ISSUE 9 FIXED — Real Google Maps Static Image (no fake CSS) */}
           <Card style={{marginBottom:16,padding:0,overflow:'hidden'}}>
-            <View style={{height:140,backgroundColor:'#C8E0DC',alignItems:'center',justifyContent:'center',position:'relative'}}>
-              <View style={{position:'absolute',width:'100%',height:2,backgroundColor:'#A0C0BC',top:'45%'}}/>
-              <View style={{position:'absolute',height:'100%',width:2,backgroundColor:'#A0C0BC',left:'42%'}}/>
-              <View style={{position:'absolute',top:'38%',left:'40%',backgroundColor:C.orange,width:34,height:34,borderRadius:17,alignItems:'center',justifyContent:'center',borderWidth:3,borderColor:'#FFF',...SHADOW.glow}}>
-                <Text style={{fontSize:15}}>📍</Text>
+            <View style={{height:160,overflow:'hidden',position:'relative'}}>
+              <Image
+                source={{ uri: (buildingName||selArea) ? getMapUrl(selArea,buildingName) : DEFAULT_MAP_URL }}
+                style={{width:'100%',height:160}}
+                resizeMode="cover"
+              />
+              {/* VEGA pin overlay on top of real map */}
+              <View style={{position:'absolute',top:0,left:0,right:0,bottom:0,alignItems:'center',justifyContent:'center',pointerEvents:'none'}}>
+                <View style={{backgroundColor:C.orange,width:36,height:36,borderRadius:18,alignItems:'center',justifyContent:'center',borderWidth:3,borderColor:'#FFF',...SHADOW.glow}}>
+                  <Text style={{fontSize:16}}>🪷</Text>
+                </View>
+                <View style={{width:2,height:10,backgroundColor:C.orange,marginTop:-2}}/>
+              </View>
+              {/* Area label overlay */}
+              <View style={{position:'absolute',top:10,left:10,backgroundColor:'rgba(255,255,255,0.92)',paddingHorizontal:10,paddingVertical:4,borderRadius:12,flexDirection:'row',alignItems:'center',gap:4}}>
+                <Text style={{fontSize:11,color:C.orange}}>📍</Text>
+                <Text style={{fontSize:11,fontWeight:'700',color:C.text}}>{selArea}, Vizag</Text>
               </View>
             </View>
             <TouchableOpacity style={{padding:14,flexDirection:'row',alignItems:'center',gap:10}} onPress={()=>setShowArea(true)}>
               <View style={{width:32,height:32,borderRadius:10,backgroundColor:C.tealBg,alignItems:'center',justifyContent:'center',borderWidth:0.5,borderColor:C.tealBd}}><Text style={{fontSize:16}}>🛡️</Text></View>
               <View style={{flex:1}}>
                 <Text style={{fontWeight:'700',color:C.text}}>{selArea} Apartments</Text>
-                <Text style={{fontSize:12,color:C.muted}}>Visakhapatnam, AP · Tap to change</Text>
+                <Text style={{fontSize:12,color:C.muted}}>Visakhapatnam, AP · Tap to change area</Text>
               </View>
               <Text style={{color:C.orange,fontWeight:'700'}}>Change ›</Text>
             </TouchableOpacity>
@@ -1550,12 +1650,28 @@ export default function App() {
             </Card>
           )}
           <Card style={{marginBottom:12,overflow:'hidden',padding:0}}>
-            <View style={{height:150,backgroundColor:'#C8E0DC',alignItems:'center',justifyContent:'center'}}>
-              <View style={{width:W-64,height:120,backgroundColor:'#BED8D4',borderRadius:12,position:'relative',overflow:'hidden'}}>
-                <View style={{position:'absolute',width:'100%',height:2,backgroundColor:'#98B8B4',top:'45%'}}/>
-                <View style={{position:'absolute',height:'100%',width:2,backgroundColor:'#98B8B4',left:'40%'}}/>
-                <View style={{position:'absolute',top:'22%',left:'28%',backgroundColor:C.orange,width:36,height:36,borderRadius:18,alignItems:'center',justifyContent:'center',borderWidth:3,borderColor:'#FFF',...SHADOW.glow}}><Text style={{fontSize:16}}>🏍️</Text></View>
-                <View style={{position:'absolute',top:'50%',left:'50%',backgroundColor:C.red,width:32,height:32,borderRadius:16,alignItems:'center',justifyContent:'center',borderWidth:3,borderColor:'#FFF'}}><Text style={{fontSize:14}}>📍</Text></View>
+            {/* ✅ TRACKING MAP — Real Google Maps showing worker route */}
+            <View style={{height:180,overflow:'hidden',position:'relative'}}>
+              <Image
+                source={{ uri: getMapUrl(selArea || 'Madhurawada', trackOrd?.addressFull || '') }}
+                style={{width:'100%',height:180}}
+                resizeMode="cover"
+              />
+              {/* Worker pin */}
+              <View style={{position:'absolute',top:'20%',left:'25%'}}>
+                <View style={{backgroundColor:C.orange,width:36,height:36,borderRadius:18,alignItems:'center',justifyContent:'center',borderWidth:3,borderColor:'#FFF',...SHADOW.glow}}>
+                  <Text style={{fontSize:16}}>🏍️</Text>
+                </View>
+              </View>
+              {/* Customer pin */}
+              <View style={{position:'absolute',top:'50%',left:'55%'}}>
+                <View style={{backgroundColor:C.red,width:32,height:32,borderRadius:16,alignItems:'center',justifyContent:'center',borderWidth:3,borderColor:'#FFF'}}>
+                  <Text style={{fontSize:14}}>📍</Text>
+                </View>
+              </View>
+              {/* ETA badge */}
+              <View style={{position:'absolute',bottom:10,right:10,backgroundColor:'rgba(0,0,0,0.7)',paddingHorizontal:10,paddingVertical:5,borderRadius:12}}>
+                <Text style={{color:'#FFF',fontSize:12,fontWeight:'700'}}>~30 min away</Text>
               </View>
             </View>
             <View style={{padding:14,flexDirection:'row',justifyContent:'space-between',alignItems:'center'}}>
@@ -1745,7 +1861,7 @@ export default function App() {
             <TouchableOpacity key={svc.id} onPress={()=>openService(svc)}
               style={{width:(W-42)/2,backgroundColor:C.card,borderRadius:18,padding:14,borderWidth:0.5,borderColor:C.border2,...SHADOW.card}}>
               <View style={{width:'100%',height:80,borderRadius:12,backgroundColor:`${svc.color}15`,alignItems:'center',justifyContent:'center',marginBottom:10}}>
-                <Text style={{fontSize:42}}>{svc.icon}</Text>
+                <SvcIcon id={svc.id} emoji={svc.icon} size={48} />
               </View>
               <Text style={{fontSize:14,fontWeight:'700',color:C.text,marginBottom:2}} numberOfLines={1}>{svc.name}</Text>
               <Text style={{fontSize:11,color:C.muted,marginBottom:6}} numberOfLines={1}>{svc.desc||'Full package service'}</Text>
@@ -1960,7 +2076,7 @@ export default function App() {
           <TouchableOpacity key={svc.id} style={{flexDirection:'row',alignItems:'center',backgroundColor:C.card,marginHorizontal:16,marginBottom:10,borderRadius:20,padding:14,borderWidth:0.5,borderColor:C.border2,overflow:'hidden',...SHADOW.card}} onPress={()=>openService(svc)}>
             <View style={{position:'absolute',left:0,top:0,bottom:0,width:5,backgroundColor:svc.gradient[0]}}/>
             <View style={{width:56,height:56,borderRadius:18,backgroundColor:svc.iconBg,alignItems:'center',justifyContent:'center',marginRight:14,marginLeft:10,borderBottomWidth:4,borderBottomColor:svc.gradient[1],...SHADOW.card,shadowColor:svc.gradient[1]}}>
-              <Text style={{fontSize:28}}>{svc.icon}</Text>
+              <SvcIcon id={svc.id} emoji={svc.icon} size={32} />
             </View>
             <View style={{flex:1}}>
               <DText style={{fontSize:15,fontWeight:'700',color:C.text}}>{svc.shortName}</DText>
@@ -1978,7 +2094,7 @@ export default function App() {
           <View key={svc.id} style={{flexDirection:'row',alignItems:'center',backgroundColor:C.card,marginHorizontal:16,marginBottom:10,borderRadius:20,padding:14,borderWidth:0.5,borderColor:C.border2,overflow:'hidden',opacity:0.65}}>
             <View style={{position:'absolute',left:0,top:0,bottom:0,width:5,backgroundColor:C.muted2}}/>
             <View style={{width:56,height:56,borderRadius:18,backgroundColor:C.light,alignItems:'center',justifyContent:'center',marginRight:14,marginLeft:10}}>
-              <Text style={{fontSize:28}}>{svc.icon}</Text>
+              <SvcIcon id={svc.id} emoji={svc.icon} size={32} />
             </View>
             <View style={{flex:1}}>
               <DText style={{fontSize:15,fontWeight:'700',color:C.muted}}>{svc.shortName}</DText>
@@ -2161,7 +2277,19 @@ export default function App() {
               <Text style={{color:C.muted2,fontSize:22}}>›</Text>
             </TouchableOpacity>
           ))}
-          {user&&<TouchableOpacity style={{borderWidth:0.5,borderColor:C.redBd,borderRadius:20,padding:14,marginTop:8,marginBottom:40,alignItems:'center',backgroundColor:C.redSolid}} onPress={()=>{setUser(null);Alert.alert('Logged out');}}>
+          {user&&<TouchableOpacity style={{borderWidth:0.5,borderColor:C.redBd,borderRadius:20,padding:14,marginTop:8,marginBottom:40,alignItems:'center',backgroundColor:C.redSolid}} onPress={()=>{
+            // ✅ Cleanup real-time listener before logout
+            if(ordersUnsub) ordersUnsub();
+            setOrdersUnsub(null);
+            setOrders([]);
+            setUser(null);
+            setPhone('');
+            setOtpVal('');
+            setConfirm(null);
+            auth().signOut().catch(e=>console.error('signOut:',e));
+            setScreen('login');
+            Alert.alert('👋 Logged out','See you soon!');
+          }}>
             <Text style={{color:C.red,fontWeight:'600',fontSize:15}}>Logout</Text>
           </TouchableOpacity>}
           {!user&&<View style={{height:40}}/>}
@@ -2247,7 +2375,7 @@ export default function App() {
               SERVICES.filter(s=>s.shortName.toLowerCase().includes(search.toLowerCase())).map((svc,i)=>(
                 <TouchableOpacity key={i} style={{flexDirection:'row',alignItems:'center',gap:14,paddingVertical:13,borderBottomWidth:0.5,borderBottomColor:C.border2}} onPress={()=>{openService(svc);setShowSearch(false);setSearch('');}}>
                   <View style={{width:52,height:52,borderRadius:16,backgroundColor:svc.iconBg,alignItems:'center',justifyContent:'center',borderBottomWidth:3,borderBottomColor:svc.gradient[1],...SHADOW.card,shadowColor:svc.gradient[1]}}>
-                    <Text style={{fontSize:24}}>{svc.icon}</Text>
+                    <SvcIcon id={svc.id} emoji={svc.icon} size={28} />
                   </View>
                   <View style={{flex:1}}>
                     <DText style={{fontWeight:'700',color:C.text,fontSize:15}}>{svc.shortName}</DText>
