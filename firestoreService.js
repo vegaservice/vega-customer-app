@@ -70,7 +70,7 @@ export const createBooking = async (bookingData) => {
       ...bookingData,
       orderId,
       otp,
-      status: 'Confirmed',
+      status: 'confirmed',
       createdAt: firestore.FieldValue.serverTimestamp(),
       rated: false,
     };
@@ -86,7 +86,7 @@ export const createBooking = async (bookingData) => {
       .doc(bookingData.userId)
       .collection('bookings')
       .doc(orderId)
-      .set({ orderId, status: 'Confirmed', createdAt: firestore.FieldValue.serverTimestamp() });
+      .set({ orderId, status: 'confirmed', createdAt: firestore.FieldValue.serverTimestamp() });
 
     return { success: true, orderId, otp, booking };
   } catch (error) {
