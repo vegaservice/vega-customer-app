@@ -157,16 +157,16 @@ const DEFAULT_MAP_URL = `https://maps.googleapis.com/maps/api/staticmap?center=M
 
 // ── FIX 3: PROFESSIONAL ICONS — Icons8 Fluency pack (free with attribution)
 const SVC_ICONS = {
-  cleaning: 'https://img.icons8.com/fluency/96/broom.png',
-  bathroom: 'https://img.icons8.com/fluency/96/bathroom.png',
-  kitchen:  'https://img.icons8.com/fluency/96/stove.png',
-  car:      'https://img.icons8.com/fluency/96/car-wash.png',
-  sofa:     'https://img.icons8.com/fluency/96/sofa.png',
-  beauty:   'https://img.icons8.com/fluency/96/beauty.png',
-  vacuum:   'https://img.icons8.com/fluency/96/vacuum-cleaner.png',
-  elder:    'https://img.icons8.com/fluency/96/elderly-person.png',
-  cook:     'https://img.icons8.com/fluency/96/cooking-pot.png',
-  repair:   'https://img.icons8.com/fluency/96/maintenance.png',
+  cleaning: 'https://img.icons8.com/3d-fluency/128/broom.png',
+  bathroom: 'https://img.icons8.com/3d-fluency/128/bathroom.png',
+  kitchen:  'https://img.icons8.com/3d-fluency/128/stove.png',
+  car:      'https://img.icons8.com/3d-fluency/128/car-wash.png',
+  sofa:     'https://img.icons8.com/3d-fluency/128/sofa.png',
+  beauty:   'https://img.icons8.com/3d-fluency/128/beauty.png',
+  vacuum:   'https://img.icons8.com/3d-fluency/128/vacuum-cleaner.png',
+  elder:    'https://img.icons8.com/3d-fluency/128/elderly-person.png',
+  cook:     'https://img.icons8.com/3d-fluency/128/cooking-pot.png',
+  repair:   'https://img.icons8.com/3d-fluency/128/maintenance.png',
 };
 // Maps service id → SVC_ICONS key so Icon3D can show real 3D images
 const SVC_ICON_MAP = {
