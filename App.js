@@ -23,6 +23,7 @@ import {
   StatusBar, ScrollView, Alert, SafeAreaView, Dimensions,
   Animated, Modal, ActivityIndicator, Platform, Image,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 
 // ── FONT SETUP ────────────────────────────────────────────────────
 // Uncomment after: expo install @expo-google-fonts/fraunces expo-font
@@ -166,6 +167,12 @@ const SVC_ICONS = {
   elder:    'https://img.icons8.com/fluency/96/elderly-person.png',
   cook:     'https://img.icons8.com/fluency/96/cooking-pot.png',
   repair:   'https://img.icons8.com/fluency/96/maintenance.png',
+};
+// Maps service id → SVC_ICONS key so Icon3D can show real 3D images
+const SVC_ICON_MAP = {
+  home: 'cleaning', bathroom: 'bathroom', kitchen: 'kitchen',
+  car:  'car',      sofa:     'sofa',     beauty:  'beauty',
+  deep: 'vacuum',   elder:    'elder',    cook:    'cook',   repair: 'repair',
 };
 const SvcIcon = ({ id, emoji, size=40, style }) => {
   const [err, setErr] = React.useState(false);
@@ -500,7 +507,7 @@ const StarRating = ({ rating, onRate, size=28 }) => (
   </View>
 );
 
-// ✅ UPGRADE 2: 3D Icon with improved depth
+// ✅ UPGRADE 2: 3D Icon with real Icons8 Fluency images
 const Icon3D = ({ svc, onPress }) => {
   const scaleAnim = useRef(new Animated.Value(1)).current;
   const handlePress = () => {
@@ -510,6 +517,7 @@ const Icon3D = ({ svc, onPress }) => {
     ]).start(() => onPress?.());
   };
   const sz = COL - 8;
+  const iconUri = SVC_ICONS[SVC_ICON_MAP[svc.id]] || null;
   return (
     <TouchableOpacity activeOpacity={1} onPress={handlePress} style={{ width:COL, alignItems:'center', marginBottom:20 }}>
       <Animated.View style={{ transform:[{ scale:scaleAnim }], alignItems:'center' }}>
@@ -531,7 +539,9 @@ const Icon3D = ({ svc, onPress }) => {
         }}>
           {/* Top-left shine */}
           <View style={{ position:'absolute', top:7, left:7, width:sz*0.44, height:sz*0.32, borderRadius:12, backgroundColor:'rgba(255,255,255,0.28)' }}/>
-          <Text style={{ fontSize:sz*0.42, lineHeight:sz*0.52 }}>{svc.icon}</Text>
+          {iconUri
+            ? <Image source={{ uri: iconUri }} style={{ width:sz*0.58, height:sz*0.58 }} resizeMode="contain"/>
+            : <Text style={{ fontSize:sz*0.42, lineHeight:sz*0.52 }}>{svc.icon}</Text>}
         </View>
         {/* Star badge */}
         {svc.badge && (
@@ -2401,10 +2411,10 @@ export default function App() {
   // 4 tabs only, gradient active state, floating with shadow
   // ════════════════════════════════════════════════════════════════
   const TABS=[
-    {id:'home',    icon:'🏠', label:'Home'},
-    {id:'services',icon:'📋', label:'Booking'},
-    {id:'offers',  icon:'🎁', label:'Offers'},
-    {id:'profile', icon:'👤', label:'Profile'},
+    {id:'home',    icon:'home',     iconOut:'home-outline',     label:'Home'},
+    {id:'services',icon:'grid',     iconOut:'grid-outline',     label:'Booking'},
+    {id:'offers',  icon:'pricetag', iconOut:'pricetag-outline', label:'Offers'},
+    {id:'profile', icon:'person',   iconOut:'person-outline',   label:'Profile'},
   ];
 
   return(
@@ -2461,7 +2471,7 @@ export default function App() {
                 backgroundColor:active?C.orange:'transparent',
                 ...(active?{...SHADOW.glow,shadowColor:C.orange}:{}),
               }} onPress={()=>setTab(t.id)}>
-                <Text style={{fontSize:20,marginBottom:1}}>{t.icon}</Text>
+                <Ionicons name={active?t.icon:t.iconOut} size={22} color={active?'#FFF':C.muted} style={{marginBottom:1}}/>
                 <Text style={{fontSize:10,fontWeight:active?'700':'500',color:active?'#FFF':C.muted}}>{t.label}</Text>
               </TouchableOpacity>
             );
@@ -2473,7 +2483,7 @@ export default function App() {
             ...(tab==='cart'?{...SHADOW.glow,shadowColor:C.orange}:{}),
           }} onPress={()=>setTab('cart')}>
             <View style={{position:'relative'}}>
-              <Text style={{fontSize:20,marginBottom:1}}>🛒</Text>
+              <Ionicons name={tab==='cart'?'cart':'cart-outline'} size={22} color={tab==='cart'?'#FFF':C.muted} style={{marginBottom:1}}/>
               {cartCount>0&&<View style={{position:'absolute',top:-5,right:-8,backgroundColor:C.red,width:16,height:16,borderRadius:8,alignItems:'center',justifyContent:'center'}}>
                 <Text style={{color:'#FFF',fontSize:9,fontWeight:'900'}}>{cartCount}</Text>
               </View>}
