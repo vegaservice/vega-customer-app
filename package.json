@@ -32,10 +32,8 @@
   "devDependencies": {
     "@babel/core": "^7.25.0",
     "@babel/preset-env": "^7.25.0",
-    "@babel/preset-react": "^7.25.0",
     "babel-jest": "^29.7.0",
-    "jest": "^29.7.0",
-    "react-test-renderer": "18.3.1"
+    "jest": "^29.7.0"
   },
   "jest": {
     "testEnvironment": "node",
@@ -46,8 +44,7 @@
       "@react-native-firebase/firestore": "<rootDir>/__mocks__/firebase-firestore.js",
       "@react-native-firebase/auth": "<rootDir>/__mocks__/firebase-auth.js",
       "@react-native-firebase/messaging": "<rootDir>/__mocks__/firebase-messaging.js"
-    },
-    "collectCoverageFrom": ["*.js", "!App.js"]
+    }
   },
   "private": true
 }

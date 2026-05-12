@@ -17,8 +17,8 @@ jobs:
         with:
           node-version: '18'
 
-      - name: Install dependencies
-        run: npm install --legacy-peer-deps
+      - name: Install test dependencies
+        run: npm install --omit=prod --legacy-peer-deps
 
       - name: Run linter
         run: npm run lint --if-present
