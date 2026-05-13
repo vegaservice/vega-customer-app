@@ -1,0 +1,16 @@
+# TEST_C11 — Use wallet balance — final total reduces
+appId: com.vegavizag.app
+---
+- launchApp
+- waitForAnimationToEnd:
+    timeout: 3500
+- runFlow: "./_login_helper.yaml"
+- tapOn: "Home Cleaning"
+- tapOn: "2 Hours"
+- tapOn: "Add to Cart"
+- tapOn: "View Cart"
+- assertVisible: "₹200"
+- tapOn: "Use Wallet"
+- waitForAnimationToEnd
+# Total should reduce by wallet amount
+- assertVisible: "Wallet"

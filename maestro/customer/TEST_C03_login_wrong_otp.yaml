@@ -1,0 +1,22 @@
+# TEST_C03 — Login with wrong OTP — should show error
+appId: com.vegavizag.app
+---
+- launchApp
+- waitForAnimationToEnd:
+    timeout: 3500
+- tapOn: "Registered number"
+- inputText: "9999999999"
+- hideKeyboard
+- tapOn: "Send OTP"
+- waitForAnimationToEnd:
+    timeout: 5000
+- assertVisible: "Enter OTP"
+- tapOn:
+    text: "——————"
+- inputText: "000000"
+- hideKeyboard
+- tapOn: "Verify & Enter"
+- waitForAnimationToEnd:
+    timeout: 5000
+# Firebase returns error → Alert shown
+- assertVisible: "Wrong OTP"

@@ -1,0 +1,14 @@
+# TEST_A03 — Filter by confirmed status
+appId: com.vegavizag.admin
+---
+- launchApp
+- waitForAnimationToEnd:
+    timeout: 3500
+- runFlow: "./_login_helper.yaml"
+- tapOn: "Bookings"
+- waitForAnimationToEnd:
+    timeout: 3000
+- tapOn: "confirmed"
+- waitForAnimationToEnd
+# Only confirmed bookings should show
+- assertNotVisible: "assigned"

@@ -1,0 +1,17 @@
+# TEST_C06 — Search for service by name
+appId: com.vegavizag.app
+---
+- launchApp
+- waitForAnimationToEnd:
+    timeout: 3500
+- runFlow: "./_login_helper.yaml"
+- assertVisible: "Search VEGA services..."
+- tapOn: "Search VEGA services..."
+- waitForAnimationToEnd
+# Search for a real service
+- inputText: "kitchen"
+- assertVisible: "Kitchen"
+# Clear and search non-existent
+- clearText
+- inputText: "zzzznotaservice"
+- assertVisible: "No results for"

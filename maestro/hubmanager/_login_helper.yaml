@@ -1,0 +1,14 @@
+# Hub Manager login sub-flow — phone 9999999998
+- tapOn: "Registered number"
+- inputText: "9999999998"
+- hideKeyboard
+- tapOn: "Send OTP →"
+- waitForAnimationToEnd:
+    timeout: 5000
+- tapOn:
+    text: "——————"
+- inputText: "123456"
+- hideKeyboard
+- tapOn: "Verify & Enter →"
+- waitForAnimationToEnd:
+    timeout: 8000

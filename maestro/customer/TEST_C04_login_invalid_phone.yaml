@@ -1,0 +1,17 @@
+# TEST_C04 — Login with invalid phone (less than 10 digits) — should block
+appId: com.vegavizag.app
+---
+- launchApp
+- waitForAnimationToEnd:
+    timeout: 3500
+- tapOn: "Registered number"
+- inputText: "99999"
+- hideKeyboard
+# Button should be disabled (opacity 0.4) — tapping does nothing
+- tapOn: "Send OTP"
+- assertNotVisible: "Enter OTP"
+# Attempt with 9 digits
+- clearText
+- inputText: "999999999"
+- tapOn: "Send OTP"
+- assertNotVisible: "Enter OTP"

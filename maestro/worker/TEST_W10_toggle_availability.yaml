@@ -1,0 +1,21 @@
+# TEST_W10 — Toggle availability on/off
+appId: com.vegavizag.worker
+---
+- launchApp
+- waitForAnimationToEnd:
+    timeout: 3500
+- runFlow: "./_login_helper.yaml"
+- tapOn: "Profile"
+- waitForAnimationToEnd
+- assertVisible: "Available for Jobs"
+- assertVisible: "● Available"
+# Toggle off
+- tapOn: "Available for Jobs"
+- waitForAnimationToEnd:
+    timeout: 2000
+- assertVisible: "● Unavailable"
+# Toggle back on
+- tapOn: "Available for Jobs"
+- waitForAnimationToEnd:
+    timeout: 2000
+- assertVisible: "● Available"

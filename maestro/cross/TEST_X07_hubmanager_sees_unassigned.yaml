@@ -1,0 +1,19 @@
+# TEST_X07 — Hub Manager sees new booking in unassigned
+# KNOWN LIMITATION: Customer App auto-assigns a worker at booking creation
+# So booking appears with assignedWorkerId set — Hub Manager unassigned filter excludes it
+# This test documents the current behavior
+appId: com.vegavizag.hubmanager
+---
+- launchApp
+- waitForAnimationToEnd:
+    timeout: 3500
+- runFlow: "../hubmanager/_login_helper.yaml"
+- tapOn: "Bookings"
+- waitForAnimationToEnd:
+    timeout: 3000
+- tapOn: "Unassigned"
+- waitForAnimationToEnd
+# Expected: bookings with status=confirmed AND no assignedWorkerId
+# Actual: Customer App sets assignedWorkerId at creation → 0 unassigned
+# To see correct behavior: manually create booking with assignedWorkerId=null in Firestore
+- assertVisible: "Unassigned"

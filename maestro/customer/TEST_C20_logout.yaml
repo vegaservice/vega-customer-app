@@ -1,0 +1,21 @@
+# TEST_C20 — Logout — clears session and returns to login
+appId: com.vegavizag.app
+---
+- launchApp
+- waitForAnimationToEnd:
+    timeout: 3500
+- runFlow: "./_login_helper.yaml"
+# Navigate to profile tab
+- tapOn: "Profile"
+- waitForAnimationToEnd
+- assertVisible: "Logout"
+- tapOn: "Logout"
+- waitForAnimationToEnd
+# Confirm dialog
+- assertVisible: "Sign out"
+- tapOn: "Logout"
+- waitForAnimationToEnd:
+    timeout: 3000
+# Should return to login screen
+- assertVisible: "Mobile Number"
+- assertVisible: "Send OTP"

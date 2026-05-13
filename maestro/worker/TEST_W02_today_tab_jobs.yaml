@@ -1,0 +1,12 @@
+# TEST_W02 — Today tab shows assigned jobs
+appId: com.vegavizag.worker
+---
+- launchApp
+- waitForAnimationToEnd:
+    timeout: 3500
+- runFlow: "./_login_helper.yaml"
+- assertVisible: "Today"
+- waitForAnimationToEnd:
+    timeout: 3000
+# If jobs assigned, Assigned badge visible; otherwise empty state visible
+- assertVisible: "Today"

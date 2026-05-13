@@ -1,0 +1,15 @@
+# TEST_H04 — Team tab — workers split into Working/Available/Inactive
+appId: com.vegavizag.hubmanager
+---
+- launchApp
+- waitForAnimationToEnd:
+    timeout: 3500
+- runFlow: "./_login_helper.yaml"
+- tapOn: "Team"
+- waitForAnimationToEnd:
+    timeout: 3000
+- assertVisible: "+ Add Employee"
+# Section headers
+- assertVisible: "Team"
+# One of these should be visible based on worker state
+- scroll

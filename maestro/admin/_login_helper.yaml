@@ -1,0 +1,14 @@
+# Admin login sub-flow — phone 9441270570
+- tapOn: "9441270570"
+- inputText: "9441270570"
+- hideKeyboard
+- tapOn: "Send OTP →"
+- waitForAnimationToEnd:
+    timeout: 5000
+- tapOn:
+    text: "——————"
+- inputText: "123456"
+- hideKeyboard
+- tapOn: "Verify & Enter →"
+- waitForAnimationToEnd:
+    timeout: 8000

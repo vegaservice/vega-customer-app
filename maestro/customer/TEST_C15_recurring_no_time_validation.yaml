@@ -1,0 +1,19 @@
+# TEST_C15 — Recurring without time — should show validation error
+appId: com.vegavizag.app
+---
+- launchApp
+- waitForAnimationToEnd:
+    timeout: 3500
+- runFlow: "./_login_helper.yaml"
+- tapOn: "Home Cleaning"
+- tapOn: "1 Hour"
+- tapOn: "Add to Cart"
+- tapOn: "View Cart"
+- tapOn: "Recurring"
+- waitForAnimationToEnd
+- tapOn: "Weekly"
+# Do NOT select a time slot — tap confirm directly
+- tapOn: "Cash"
+- tapOn: "Confirm Booking"
+- waitForAnimationToEnd
+- assertVisible: "Time Required"

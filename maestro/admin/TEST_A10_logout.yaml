@@ -1,0 +1,14 @@
+# TEST_A10 — Logout works
+appId: com.vegavizag.admin
+---
+- launchApp
+- waitForAnimationToEnd:
+    timeout: 3500
+- runFlow: "./_login_helper.yaml"
+- tapOn: "Profile"
+- waitForAnimationToEnd
+- tapOn: "Logout"
+- tapOn: "Logout"
+- waitForAnimationToEnd:
+    timeout: 3000
+- assertVisible: "Admin Phone"

@@ -1,0 +1,14 @@
+# Reusable login sub-flow for 9999999999
+- tapOn: "Registered number"
+- inputText: "9999999999"
+- hideKeyboard
+- tapOn: "Send OTP"
+- waitForAnimationToEnd:
+    timeout: 5000
+- tapOn:
+    text: "——————"
+- inputText: "123456"
+- hideKeyboard
+- tapOn: "Verify & Enter"
+- waitForAnimationToEnd:
+    timeout: 8000

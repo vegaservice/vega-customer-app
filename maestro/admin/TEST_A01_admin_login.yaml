@@ -1,0 +1,26 @@
+# TEST_A01 — Login with admin phone 9441270570
+appId: com.vegavizag.admin
+---
+- launchApp:
+    clearState: true
+- waitForAnimationToEnd:
+    timeout: 3500
+- assertVisible: "VEGA"
+- assertVisible: "ADMIN CONSOLE"
+- assertVisible: "Admin Mobile Number"
+- tapOn: "9441270570"
+- inputText: "9441270570"
+- hideKeyboard
+- tapOn: "Send OTP →"
+- waitForAnimationToEnd:
+    timeout: 5000
+- assertVisible: "Enter OTP"
+- tapOn:
+    text: "——————"
+- inputText: "123456"
+- hideKeyboard
+- tapOn: "Verify & Enter →"
+- waitForAnimationToEnd:
+    timeout: 8000
+- assertVisible: "VEGA"
+- assertVisible: "Bookings"

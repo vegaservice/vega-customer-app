@@ -1,0 +1,4 @@
+# TEST_W01 — placeholder
+appId: com.vegavizag.worker
+---
+- launchApp

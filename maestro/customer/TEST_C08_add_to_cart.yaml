@@ -1,0 +1,15 @@
+# TEST_C08 — Add service to cart — cart badge updates
+appId: com.vegavizag.app
+---
+- launchApp
+- waitForAnimationToEnd:
+    timeout: 3500
+- runFlow: "./_login_helper.yaml"
+- tapOn: "Home Cleaning"
+- waitForAnimationToEnd
+- tapOn: "2 Hours"
+- tapOn: "Add to Cart"
+- waitForAnimationToEnd
+# Cart badge should show 1 item
+- assertVisible: "1"
+- assertVisible: "₹199"

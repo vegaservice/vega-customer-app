@@ -1,0 +1,19 @@
+# TEST_W06 — Enter correct OTP — status changes to in_progress
+# Precondition: at least 1 before photo uploaded
+appId: com.vegavizag.worker
+---
+- launchApp
+- waitForAnimationToEnd:
+    timeout: 3500
+- runFlow: "./_login_helper.yaml"
+- tapOn: "Active"
+- waitForAnimationToEnd
+- tapOn: "On the Way"
+- waitForAnimationToEnd
+# Enter customer OTP (from booking.otp)
+- tapOn: "0000"
+- inputText: "BOOKING_OTP_HERE"
+- tapOn: "Verify OTP & Start Service"
+- waitForAnimationToEnd:
+    timeout: 3000
+- assertVisible: "In Progress"

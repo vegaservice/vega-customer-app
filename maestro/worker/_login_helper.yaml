@@ -1,0 +1,14 @@
+# Worker login sub-flow — phone 7777777701
+- tapOn: "Enter your number"
+- inputText: "7777777701"
+- hideKeyboard
+- tapOn: "Send OTP"
+- waitForAnimationToEnd:
+    timeout: 5000
+- tapOn:
+    text: "——————"
+- inputText: "123456"
+- hideKeyboard
+- tapOn: "Verify & Login"
+- waitForAnimationToEnd:
+    timeout: 8000

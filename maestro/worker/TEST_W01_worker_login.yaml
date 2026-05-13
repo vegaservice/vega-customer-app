@@ -1,0 +1,26 @@
+# TEST_W01 — Login with 7777777701 + OTP 123456
+appId: com.vegavizag.worker
+---
+- launchApp:
+    clearState: true
+- waitForAnimationToEnd:
+    timeout: 3500
+- assertVisible: "PROFESSIONAL APP"
+- assertVisible: "VEGA"
+- tapOn: "Enter your number"
+- inputText: "7777777701"
+- hideKeyboard
+- tapOn: "Send OTP"
+- waitForAnimationToEnd:
+    timeout: 5000
+- assertVisible: "Enter OTP"
+- tapOn:
+    text: "——————"
+- inputText: "123456"
+- hideKeyboard
+- tapOn: "Verify & Login"
+- waitForAnimationToEnd:
+    timeout: 8000
+- assertVisible: "Today"
+- assertVisible: "Active"
+- assertVisible: "● Available"

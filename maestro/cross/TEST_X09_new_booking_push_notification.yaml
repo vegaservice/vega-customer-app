@@ -1,0 +1,20 @@
+# TEST_X09 — New booking → Hub Manager gets push notification
+# Requires: Cloud Functions deployed + FCM token registered
+# This is an integration test — cannot be fully automated without FCM test harness
+appId: com.vegavizag.app
+---
+- launchApp
+- waitForAnimationToEnd:
+    timeout: 3500
+- runFlow: "../customer/_login_helper.yaml"
+- tapOn: "Home Cleaning"
+- tapOn: "1 Hour"
+- tapOn: "Add to Cart"
+- tapOn: "View Cart"
+- tapOn: "Cash"
+- tapOn: "Confirm Booking"
+- waitForAnimationToEnd:
+    timeout: 8000
+- assertVisible: "Booking Confirmed"
+# Expected: Hub Manager device receives FCM notification "New Booking Received!"
+# Verify in Firebase Console → Cloud Functions → Logs

@@ -1,0 +1,18 @@
+# TEST_C09 — Add multiple services — cart shows correct total
+appId: com.vegavizag.app
+---
+- launchApp
+- waitForAnimationToEnd:
+    timeout: 3500
+- runFlow: "./_login_helper.yaml"
+- tapOn: "Home Cleaning"
+- waitForAnimationToEnd
+- tapOn: "2 Hours"
+- tapOn: "Add to Cart"
+- tapOn: "← Back"
+- tapOn: "Bathroom"
+- tapOn: "1 Bath"
+- tapOn: "Add to Cart"
+- waitForAnimationToEnd
+# Total = 199 + 149 + 29 platform = 377
+- assertVisible: "₹377"

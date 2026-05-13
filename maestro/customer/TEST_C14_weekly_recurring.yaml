@@ -1,0 +1,21 @@
+# TEST_C14 — Weekly recurring booking — select date — confirms
+appId: com.vegavizag.app
+---
+- launchApp
+- waitForAnimationToEnd:
+    timeout: 3500
+- runFlow: "./_login_helper.yaml"
+- tapOn: "Home Cleaning"
+- tapOn: "1 Hour"
+- tapOn: "Add to Cart"
+- tapOn: "View Cart"
+- tapOn: "Recurring"
+- waitForAnimationToEnd
+- tapOn: "Weekly"
+- scroll
+- tapOn: "08:00 AM"
+- tapOn: "Cash"
+- tapOn: "Confirm Booking"
+- waitForAnimationToEnd:
+    timeout: 10000
+- assertVisible: "Booking Confirmed"

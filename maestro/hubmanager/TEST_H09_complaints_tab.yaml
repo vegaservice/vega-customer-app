@@ -1,0 +1,11 @@
+# TEST_H09 — Complaints tab loads
+appId: com.vegavizag.hubmanager
+---
+- launchApp
+- waitForAnimationToEnd:
+    timeout: 3500
+- runFlow: "./_login_helper.yaml"
+- tapOn: "Issues"
+- waitForAnimationToEnd:
+    timeout: 3000
+- assertVisible: "Complaints"

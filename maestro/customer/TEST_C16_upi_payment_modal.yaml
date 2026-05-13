@@ -1,0 +1,29 @@
+# TEST_C16 — UPI payment — mock modal shows and confirms
+appId: com.vegavizag.app
+---
+- launchApp
+- waitForAnimationToEnd:
+    timeout: 3500
+- runFlow: "./_login_helper.yaml"
+- tapOn: "Home Cleaning"
+- waitForAnimationToEnd
+- tapOn: "2 Hours"
+- tapOn: "Add to Cart"
+- tapOn: "Proceed to Checkout"
+- waitForAnimationToEnd
+- tapOn: "UPI"
+- tapOn:
+    text: "Confirm Booking"
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 3000
+# MockPayModal — step 0: processing
+- assertVisible: "Processing Payment"
+- waitForAnimationToEnd:
+    timeout: 4000
+# MockPayModal — step 1: success
+- assertVisible: "Payment Successful"
+- tapOn: "Continue to Booking"
+- waitForAnimationToEnd:
+    timeout: 8000
+- assertVisible: "Booking Confirmed"

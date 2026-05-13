@@ -1,0 +1,27 @@
+# TEST_C05 — Home screen loads all service categories
+appId: com.vegavizag.app
+---
+- launchApp
+- waitForAnimationToEnd:
+    timeout: 3500
+- tapOn: "Registered number"
+- inputText: "9999999999"
+- hideKeyboard
+- tapOn: "Send OTP"
+- waitForAnimationToEnd:
+    timeout: 5000
+- tapOn:
+    text: "——————"
+- inputText: "123456"
+- hideKeyboard
+- tapOn: "Verify & Enter"
+- waitForAnimationToEnd:
+    timeout: 8000
+# Verify main service categories visible
+- assertVisible: "Home Cleaning"
+- assertVisible: "Bathroom"
+- assertVisible: "Kitchen"
+- assertVisible: "Car Wash"
+- scroll
+- assertVisible: "Sofa"
+- assertVisible: "Beauty"

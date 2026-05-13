@@ -1,0 +1,13 @@
+# TEST_C01 — Splash and onboarding flow
+# App: Customer — com.vegavizag.app
+appId: com.vegavizag.app
+---
+- launchApp:
+    clearState: true
+- assertVisible: "VEGA"
+- waitForAnimationToEnd:
+    timeout: 3500
+# After 2500ms splash disappears → login screen
+- assertVisible: "Mobile Number"
+- assertVisible: "Send OTP"
+- assertVisible: "🇮🇳 +91"

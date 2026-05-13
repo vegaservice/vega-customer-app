@@ -1,0 +1,22 @@
+# TEST_C18 — Track order screen — map shows Madhurawada
+appId: com.vegavizag.app
+---
+- launchApp
+- waitForAnimationToEnd:
+    timeout: 3500
+- runFlow: "./_login_helper.yaml"
+- tapOn: "Home Cleaning"
+- tapOn: "1 Hour"
+- tapOn: "Add to Cart"
+- tapOn: "View Cart"
+- tapOn: "Cash"
+- tapOn: "Confirm Booking"
+- waitForAnimationToEnd:
+    timeout: 8000
+- tapOn: "Track Order"
+- waitForAnimationToEnd:
+    timeout: 3000
+# Track screen shows status and map area
+- assertVisible: "confirmed"
+- assertVisible: "OTP"
+- assertVisible: "Madhurawada"

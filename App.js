@@ -895,9 +895,11 @@ export default function App() {
         customerPhone: phone,          // ← for Firestore .where() query
         userName: user.name,
         userPhone: phone,
-        assignedWorkerId: pro.id||null,
-        assignedWorkerName: pro.name||null,
-        assignedWorkerPhone: pro.phone||null,
+        // ← NOT setting assignedWorkerId here — Hub Manager / Admin must assign
+        // professional object is only for customer-facing display
+        assignedWorkerId: null,
+        assignedWorkerName: null,
+        assignedWorkerPhone: null,
         items: cart,
         subtotal: totalPrice,
         total: finalTotal,

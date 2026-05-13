@@ -1,0 +1,21 @@
+# TEST_A07 — Add new employee — name + phone + role
+appId: com.vegavizag.admin
+---
+- launchApp
+- waitForAnimationToEnd:
+    timeout: 3500
+- runFlow: "./_login_helper.yaml"
+- tapOn: "Team"
+- waitForAnimationToEnd
+- tapOn: "Add Employee"
+- waitForAnimationToEnd
+- assertVisible: "Full Name"
+- tapOn: "Full Name"
+- inputText: "Test Worker Maestro"
+- tapOn: "Phone Number"
+- inputText: "9876543211"
+- hideKeyboard
+- tapOn: "Save"
+- waitForAnimationToEnd:
+    timeout: 3000
+- assertVisible: "Added"

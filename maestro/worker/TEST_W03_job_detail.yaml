@@ -1,0 +1,17 @@
+# TEST_W03 — Tap job — detail screen opens
+appId: com.vegavizag.worker
+---
+- launchApp
+- waitForAnimationToEnd:
+    timeout: 3500
+- runFlow: "./_login_helper.yaml"
+- tapOn: "Active"
+- waitForAnimationToEnd
+# Tap first job card
+- scroll
+- tapOn: "Assigned"
+- waitForAnimationToEnd
+- assertVisible: "Job Details"
+- assertVisible: "CUSTOMER"
+- assertVisible: "PHOTO PROOF"
+- assertVisible: "TIME TRACKING"

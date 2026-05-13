@@ -1,0 +1,19 @@
+# TEST_C10 — Apply promo code VEGA50 — discount applied
+appId: com.vegavizag.app
+---
+- launchApp
+- waitForAnimationToEnd:
+    timeout: 3500
+- runFlow: "./_login_helper.yaml"
+- tapOn: "Home Cleaning"
+- tapOn: "2 Hours"
+- tapOn: "Add to Cart"
+- tapOn: "View Cart"
+- assertVisible: "Promo Code"
+- tapOn: "Enter promo code"
+- inputText: "VEGA50"
+- hideKeyboard
+- tapOn: "Apply"
+- waitForAnimationToEnd:
+    timeout: 3000
+- assertVisible: "VEGA50"

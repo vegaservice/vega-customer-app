@@ -1,0 +1,34 @@
+# TEST_W05 — Enter wrong OTP 3 times — lockout message shows
+appId: com.vegavizag.worker
+---
+- launchApp
+- waitForAnimationToEnd:
+    timeout: 3500
+- runFlow: "./_login_helper.yaml"
+- tapOn: "Active"
+- waitForAnimationToEnd
+- tapOn: "On the Way"
+- waitForAnimationToEnd
+- assertVisible: "ENTER CUSTOMER OTP"
+# Wrong attempt 1
+- tapOn: "0000"
+- inputText: "9999"
+- tapOn: "Verify OTP"
+- waitForAnimationToEnd
+- assertVisible: "Wrong OTP"
+- assertVisible: "2 attempts remaining"
+- tapOn: "OK"
+# Wrong attempt 2
+- clearText
+- inputText: "8888"
+- tapOn: "Verify OTP"
+- waitForAnimationToEnd
+- assertVisible: "1 attempt"
+- tapOn: "OK"
+# Wrong attempt 3
+- clearText
+- inputText: "7777"
+- tapOn: "Verify OTP"
+- waitForAnimationToEnd
+- assertVisible: "Too many attempts"
+- assertVisible: "Hub Manager"

@@ -1,0 +1,17 @@
+# TEST_H07 — Attendance tab — mark worker Present
+appId: com.vegavizag.hubmanager
+---
+- launchApp
+- waitForAnimationToEnd:
+    timeout: 3500
+- runFlow: "./_login_helper.yaml"
+- tapOn: "Attend"
+- waitForAnimationToEnd:
+    timeout: 3000
+- assertVisible: "Attendance"
+- scroll
+# Find first worker and mark Present
+- tapOn: "Present"
+- waitForAnimationToEnd:
+    timeout: 2000
+- assertVisible: "Marked"

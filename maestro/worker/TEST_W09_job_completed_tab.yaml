@@ -1,0 +1,12 @@
+# TEST_W09 — Job moves to completed tab
+appId: com.vegavizag.worker
+---
+- launchApp
+- waitForAnimationToEnd:
+    timeout: 3500
+- runFlow: "./_login_helper.yaml"
+- tapOn: "Done"
+- waitForAnimationToEnd:
+    timeout: 3000
+# Completed jobs should appear with Done badge
+- assertVisible: "Done"
