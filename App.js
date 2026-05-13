@@ -24,6 +24,7 @@ import {
   Animated, Modal, ActivityIndicator, Platform, Image,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import messaging from '@react-native-firebase/messaging';
 
 // ── FONT SETUP ────────────────────────────────────────────────────
 // Uncomment after: expo install @expo-google-fonts/fraunces expo-font
@@ -584,6 +585,46 @@ const StepBar = ({ step, total=4, labels }) => (
 // ════════════════════════════════════════════════════════════════
 // MAIN APP
 // ════════════════════════════════════════════════════════════════
+
+// ── Mock Payment Modal (replace with real Razorpay when keys available) ──────
+const MockPayModal = ({ visible, amount, method, onSuccess }) => {
+  const [step, setStep] = React.useState(0); // 0=processing, 1=success
+  React.useEffect(() => {
+    if (!visible) { setStep(0); return; }
+    const t = setTimeout(() => setStep(1), 2400);
+    return () => clearTimeout(t);
+  }, [visible]);
+  const label = { upi:'UPI / GPay', card:'Debit / Credit Card', netbanking:'Net Banking' }[method] || method;
+  return (
+    <Modal visible={visible} transparent animationType="fade">
+      <View style={{flex:1,backgroundColor:'rgba(0,0,0,0.65)',alignItems:'center',justifyContent:'center',padding:32}}>
+        <View style={{backgroundColor:'#FFF',borderRadius:24,padding:32,width:'100%',alignItems:'center',shadowColor:'#000',shadowOpacity:0.25,shadowRadius:20,elevation:12}}>
+          {step===0?(
+            <>
+              <ActivityIndicator size="large" color="#F97316" style={{marginBottom:18}}/>
+              <Text style={{fontWeight:'700',fontSize:17,color:'#18080A',marginBottom:6}}>Processing Payment…</Text>
+              <Text style={{color:'#9D6A47',fontSize:14}}>₹{amount} via {label}</Text>
+              <Text style={{color:'#C4A07A',fontSize:11,marginTop:10}}>Please do not press back</Text>
+            </>
+          ):(
+            <>
+              <View style={{width:68,height:68,borderRadius:34,backgroundColor:'#DCFCE7',alignItems:'center',justifyContent:'center',marginBottom:16}}>
+                <Text style={{fontSize:34}}>✓</Text>
+              </View>
+              <Text style={{fontWeight:'800',fontSize:19,color:'#18080A',marginBottom:4}}>Payment Successful!</Text>
+              <Text style={{color:'#4A8A2A',fontSize:14,marginBottom:26}}>₹{amount} paid via {label}</Text>
+              <TouchableOpacity onPress={onSuccess}
+                style={{backgroundColor:'#F97316',paddingHorizontal:36,paddingVertical:15,borderRadius:28,shadowColor:'#F97316',shadowOpacity:0.45,shadowRadius:8,elevation:6}}>
+                <Text style={{color:'#FFF',fontWeight:'700',fontSize:16}}>Continue to Booking →</Text>
+              </TouchableOpacity>
+            </>
+          )}
+        </View>
+      </View>
+    </Modal>
+  );
+};
+
 export default function App() {
   const [screen,        setScreen]        = useState('splash');
   const [tab,           setTab]           = useState('home');
@@ -611,6 +652,7 @@ export default function App() {
   const [showArea,      setShowArea]      = useState(false);
   const [showTerms,     setShowTerms]     = useState(false);
   const [selPayMethod,  setSelPayMethod]  = useState('upi');
+  const [showPayModal,  setShowPayModal]  = useState(false);
   const [cart,          setCart]          = useState([]);
   const [promoCode,     setPromoCode]     = useState('');
   const [appliedPromo,  setAppliedPromo]  = useState(null);
@@ -713,6 +755,16 @@ export default function App() {
     }
   };
 
+
+  // Registers FCM token so Cloud Functions can push notifications to this customer
+  const registerCustomerFCM = async (ph) => {
+    try {
+      await messaging().requestPermission();
+      const token = await messaging().getToken();
+      if (token) await firestore().collection('users').doc(ph).set({ fcmToken: token }, { merge: true });
+    } catch(e) { console.log('Customer FCM:', e); }
+  };
+
   const verifyOTP = async()=>{
     if(!otpVal||otpVal.length<6){Alert.alert('Invalid','Please enter the 6-digit OTP');return;}
     setLoading(true);
@@ -742,6 +794,7 @@ export default function App() {
           .onSnapshot(snap=>setOrders(snap.docs.map(d=>({id:d.id,...d.data()}))),
             err=>console.error('orders:',err));
         setOrdersUnsub(()=>unsub);
+        registerCustomerFCM(phone);
         setLoading(false);
         setScreen('main');setTab('home');
         Alert.alert('🪷 Welcome back!',`Namaste ${finalUser.name}!`);
@@ -766,6 +819,7 @@ export default function App() {
           .onSnapshot(snap=>setOrders(snap.docs.map(d=>({id:d.id,...d.data()}))),
             err=>console.error('orders:',err));
         setOrdersUnsub(()=>unsub2);
+        registerCustomerFCM(phone);
         setLoading(false);
         setScreen('main');setTab('home');
         Alert.alert('🪷 Welcome!',`Namaste ${uname||'Customer'}!\n🎁 ₹200 wallet bonus added!`);
@@ -775,6 +829,12 @@ export default function App() {
       console.error('verifyOTP error:',err);
       Alert.alert('Verification Failed',err.message||'Wrong OTP. Please try again.');
     }
+  };
+
+  // Intercepts non-cash payments to show mock payment modal before booking
+  const handleConfirmBooking = () => {
+    if (selPayMethod === 'cash') { placeOrder(); return; }
+    setShowPayModal(true);
   };
 
   const placeOrder = async()=>{
@@ -801,7 +861,7 @@ export default function App() {
       setTimeout(()=>{
         const otp=Math.floor(1000+Math.random()*9000).toString();
         const oid='VG'+Date.now().toString().slice(-6);
-        const o={orderId:oid,otp,items:[...cart],total:finalTotal,slot,addr:fullAddr,status:'Confirmed',time:new Date().toLocaleString('en-IN'),professional:pro,rated:false,bookingMode:bookMode,recurFreq:bookMode==='recurring'?(recurFreq||'Weekly'):null};
+        const o={orderId:oid,otp,items:[...cart],total:finalTotal,slot,addr:fullAddr,status:'confirmed',time:new Date().toLocaleString('en-IN'),professional:pro,rated:false,bookingMode:bookMode,recurFreq:bookMode==='recurring'?(recurFreq||'Weekly'):null};
         setOrders(p=>[o,...p]);
         if(useWallet&&walletSave>0) setWallet(w=>w-walletSave);
         resetForm();
@@ -878,7 +938,7 @@ export default function App() {
         items: [...cart],
         total: finalTotal,
         slot, addr: fullAddr,
-        status: 'Confirmed',
+        status: 'confirmed',
         time: new Date().toLocaleString('en-IN'),
         professional: pro,
         rated: false,
@@ -1511,11 +1571,17 @@ export default function App() {
               </TouchableOpacity>
             ))}
           </Card>
-          <TouchableOpacity style={[S.btn,{paddingVertical:18,borderRadius:30,...SHADOW.glow},placing&&{opacity:0.4}]} disabled={placing} onPress={placeOrder}>
+          <TouchableOpacity style={[S.btn,{paddingVertical:18,borderRadius:30,...SHADOW.glow},placing&&{opacity:0.4}]} disabled={placing} onPress={handleConfirmBooking}>
             {placing?<ActivityIndicator color="#FFF"/>:<Text style={[S.btnT,{fontSize:17}]}>🔒 Confirm Booking — ₹{finalTotal}</Text>}
           </TouchableOpacity>
           <View style={{height:40}}/>
         </ScrollView>
+        <MockPayModal
+          visible={showPayModal}
+          amount={finalTotal}
+          method={selPayMethod}
+          onSuccess={()=>{ setShowPayModal(false); placeOrder(); }}
+        />
       </SafeAreaView>
     );
   }
