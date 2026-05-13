@@ -62,7 +62,7 @@ const getHubManagerAndAdminTokens = async () => {
   const [hubSnap, adminSnap] = await Promise.all([
     db.collection('workers')
       .where('role', '==', 'hub_manager')
-      .where('isActive', '==', true)
+      .where('status', '==', 'active')
       .get(),
     db.collection('admins').get(),
   ]);

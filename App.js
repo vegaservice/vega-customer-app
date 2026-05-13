@@ -904,7 +904,7 @@ export default function App() {
         promoCode: appliedPromo?.code||null,
         promoDiscount: promoSave||0,
         walletUsed: walletSave||0,
-        platformFee: 19,
+        platformFee: 29,
         slot,
         bookingMode: bookMode,
         recurFreq: bookMode==='recurring'?(recurFreq||'Weekly'):null,
