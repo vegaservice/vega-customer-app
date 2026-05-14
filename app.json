@@ -17,7 +17,9 @@
       "bundleIdentifier": "com.vegavizag.app",
       "buildNumber": "1",
       "appleTeamId": "73RYNYV3JU",
+      "googleServicesFile": "./GoogleService-Info.plist",
       "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false,
         "NSCameraUsageDescription": "VEGA needs camera access for service photos",
         "NSPhotoLibraryUsageDescription": "VEGA needs photo access for service photos",
         "NSLocationWhenInUseUsageDescription": "VEGA needs location to find services near you"

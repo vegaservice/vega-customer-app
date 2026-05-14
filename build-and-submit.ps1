@@ -1,80 +1,84 @@
 # VEGA Build & Submit — All 4 Apps
 # Double-click this file to build and submit all apps to Play Store + App Store
-# First time: EAS will ask for your Apple password and 2FA code — enter them once, saved forever after
 
 $BASE = "C:\Users\MaheshPappala\Desktop\My Business"
 
 $APPS = @(
-    @{ name = "VEGA Customer";    path = "$BASE\Vega-app" },
-    @{ name = "VEGA Worker";      path = "$BASE\VEGA-Worker-App" },
-    @{ name = "VEGA Admin";       path = "$BASE\Vega-admin" },
-    @{ name = "VEGA Hub Manager"; path = "$BASE\VEGA-HubManager-App" }
+    @{ name = "VEGA Customer";    path = "$BASE\Vega-app";             androidKey = "./google-play-key.json" },
+    @{ name = "VEGA Worker";      path = "$BASE\VEGA-Worker-App";      androidKey = "./google-play-key.json" },
+    @{ name = "VEGA Admin";       path = "$BASE\Vega-admin";           androidKey = "./google-play-key.json" },
+    @{ name = "VEGA Hub Manager"; path = "$BASE\VEGA-HubManager-App";  androidKey = "./google-play-key.json" }
 )
 
-function Run-Build($app) {
-    Write-Host ""
-    Write-Host "========================================" -ForegroundColor Cyan
-    Write-Host " Building: $($app.name)" -ForegroundColor Cyan
-    Write-Host "========================================" -ForegroundColor Cyan
-
-    Set-Location $app.path
-
-    Write-Host "-> Android build..." -ForegroundColor Yellow
-    eas build --platform android --profile production --non-interactive
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "Android build FAILED for $($app.name)" -ForegroundColor Red
-        return $false
-    }
-
-    Write-Host "-> iOS build..." -ForegroundColor Yellow
-    eas build --platform ios --profile production --non-interactive
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "iOS build FAILED for $($app.name)" -ForegroundColor Red
-        return $false
-    }
-
-    return $true
-}
-
-function Run-Submit($app) {
-    Set-Location $app.path
-
-    Write-Host ""
-    Write-Host "-> Submitting $($app.name) to Play Store..." -ForegroundColor Yellow
-    eas submit --platform android --profile production --non-interactive
-
-    Write-Host "-> Submitting $($app.name) to App Store..." -ForegroundColor Yellow
-    eas submit --platform ios --profile production --non-interactive
-}
+# Upgrade EAS CLI first
+Write-Host "Upgrading EAS CLI..." -ForegroundColor Cyan
+npm install -g eas-cli@latest
 
 # Login check
 Write-Host "Checking EAS login..." -ForegroundColor Green
 eas whoami
 if ($LASTEXITCODE -ne 0) {
-    Write-Host "Not logged in. Logging in now..." -ForegroundColor Yellow
     eas login
+}
+
+# Pull latest code for all apps
+foreach ($app in $APPS) {
+    if (Test-Path $app.path) {
+        Write-Host "Pulling latest code for $($app.name)..." -ForegroundColor Yellow
+        Set-Location $app.path
+        git pull origin claude/fix-github-access-awbra
+    }
 }
 
 # Build all apps
 $built = @()
 foreach ($app in $APPS) {
-    $ok = Run-Build $app
-    if ($ok) { $built += $app }
+    if (-not (Test-Path $app.path)) {
+        Write-Host "SKIP: folder not found — $($app.path)" -ForegroundColor Red
+        continue
+    }
+    Set-Location $app.path
+    Write-Host ""
+    Write-Host "======================================" -ForegroundColor Cyan
+    Write-Host " Building: $($app.name)" -ForegroundColor Cyan
+    Write-Host "======================================" -ForegroundColor Cyan
+
+    Write-Host "-> Android build..." -ForegroundColor Yellow
+    eas build --platform android --profile production --non-interactive
+    $androidOk = $LASTEXITCODE -eq 0
+
+    Write-Host "-> iOS build..." -ForegroundColor Yellow
+    eas build --platform ios --profile production --non-interactive
+    $iosOk = $LASTEXITCODE -eq 0
+
+    $built += @{ app = $app; androidOk = $androidOk; iosOk = $iosOk }
 }
 
-# Submit all successfully built apps
+# Submit all
 Write-Host ""
-Write-Host "========================================" -ForegroundColor Green
-Write-Host " All builds done. Submitting to stores..." -ForegroundColor Green
-Write-Host "========================================" -ForegroundColor Green
+Write-Host "======================================" -ForegroundColor Green
+Write-Host " Submitting to stores..." -ForegroundColor Green
+Write-Host "======================================" -ForegroundColor Green
 
-foreach ($app in $built) {
-    Run-Submit $app
+foreach ($item in $built) {
+    $app = $item.app
+    Set-Location $app.path
+
+    if ($item.androidOk) {
+        Write-Host "-> Submitting $($app.name) to Play Store..." -ForegroundColor Yellow
+        eas submit --platform android --profile production --latest --non-interactive
+    }
+
+    if ($item.iosOk) {
+        Write-Host "-> Submitting $($app.name) to App Store..." -ForegroundColor Yellow
+        eas submit --platform ios --profile production --latest --non-interactive
+    }
 }
 
 Write-Host ""
-Write-Host "========================================" -ForegroundColor Green
-Write-Host " DONE! Check App Store Connect and" -ForegroundColor Green
+Write-Host "======================================" -ForegroundColor Green
+Write-Host " ALL DONE!" -ForegroundColor Green
+Write-Host " Check App Store Connect and" -ForegroundColor Green
 Write-Host " Google Play Console for status." -ForegroundColor Green
-Write-Host "========================================" -ForegroundColor Green
+Write-Host "======================================" -ForegroundColor Green
 pause
