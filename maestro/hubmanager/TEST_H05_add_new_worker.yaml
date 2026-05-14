@@ -1,0 +1,26 @@
+# TEST_H05 — Add new worker from Team tab
+appId: com.vegavizag.hubmanager
+---
+- launchApp
+- waitForAnimationToEnd:
+    timeout: 3500
+- runFlow: "./_login_helper.yaml"
+- tapOn: "Team"
+- waitForAnimationToEnd
+- tapOn: "+ Add Employee"
+- waitForAnimationToEnd
+- assertVisible: "Add Worker"
+- assertVisible: "Full Name"
+- assertVisible: "Mobile Number"
+- assertVisible: "Role"
+- assertVisible: "Worker"
+- assertVisible: "Hub Manager"
+- tapOn: "Full Name"
+- inputText: "Priya Test"
+- tapOn: "Mobile Number"
+- inputText: "9988776655"
+- hideKeyboard
+- tapOn: "Save"
+- waitForAnimationToEnd:
+    timeout: 3000
+- assertVisible: "Priya Test"

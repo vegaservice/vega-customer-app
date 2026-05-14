@@ -1,0 +1,20 @@
+# TEST_X04 — Worker enters OTP → Customer sees in_progress
+appId: com.vegavizag.worker
+---
+- launchApp
+- waitForAnimationToEnd:
+    timeout: 3500
+- runFlow: "../worker/_login_helper.yaml"
+- tapOn: "Active"
+- waitForAnimationToEnd
+- tapOn: "On the Way"
+- waitForAnimationToEnd
+- assertVisible: "ENTER CUSTOMER OTP"
+# Worker enters OTP from booking.otp
+- tapOn: "0000"
+- inputText: "BOOKING_OTP"
+- tapOn: "Verify OTP & Start Service"
+- waitForAnimationToEnd:
+    timeout: 3000
+- assertVisible: "In Progress"
+# Customer track screen should show "In Progress" — verify separately

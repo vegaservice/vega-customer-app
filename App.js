@@ -23,6 +23,8 @@ import {
   StatusBar, ScrollView, Alert, SafeAreaView, Dimensions,
   Animated, Modal, ActivityIndicator, Platform, Image,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import messaging from '@react-native-firebase/messaging';
 
 // ── FONT SETUP ────────────────────────────────────────────────────
 // Uncomment after: expo install @expo-google-fonts/fraunces expo-font
@@ -156,16 +158,22 @@ const DEFAULT_MAP_URL = `https://maps.googleapis.com/maps/api/staticmap?center=M
 
 // ── FIX 3: PROFESSIONAL ICONS — Icons8 Fluency pack (free with attribution)
 const SVC_ICONS = {
-  cleaning: 'https://img.icons8.com/fluency/96/broom.png',
-  bathroom: 'https://img.icons8.com/fluency/96/bathroom.png',
-  kitchen:  'https://img.icons8.com/fluency/96/stove.png',
-  car:      'https://img.icons8.com/fluency/96/car-wash.png',
-  sofa:     'https://img.icons8.com/fluency/96/sofa.png',
-  beauty:   'https://img.icons8.com/fluency/96/beauty.png',
-  vacuum:   'https://img.icons8.com/fluency/96/vacuum-cleaner.png',
-  elder:    'https://img.icons8.com/fluency/96/elderly-person.png',
-  cook:     'https://img.icons8.com/fluency/96/cooking-pot.png',
-  repair:   'https://img.icons8.com/fluency/96/maintenance.png',
+  cleaning: 'https://img.icons8.com/3d-fluency/128/broom.png',
+  bathroom: 'https://img.icons8.com/3d-fluency/128/bathroom.png',
+  kitchen:  'https://img.icons8.com/3d-fluency/128/stove.png',
+  car:      'https://img.icons8.com/3d-fluency/128/car-wash.png',
+  sofa:     'https://img.icons8.com/3d-fluency/128/sofa.png',
+  beauty:   'https://img.icons8.com/3d-fluency/128/beauty.png',
+  vacuum:   'https://img.icons8.com/3d-fluency/128/vacuum-cleaner.png',
+  elder:    'https://img.icons8.com/3d-fluency/128/elderly-person.png',
+  cook:     'https://img.icons8.com/3d-fluency/128/cooking-pot.png',
+  repair:   'https://img.icons8.com/3d-fluency/128/maintenance.png',
+};
+// Maps service id → SVC_ICONS key so Icon3D can show real 3D images
+const SVC_ICON_MAP = {
+  home: 'cleaning', bathroom: 'bathroom', kitchen: 'kitchen',
+  car:  'car',      sofa:     'sofa',     beauty:  'beauty',
+  deep: 'vacuum',   elder:    'elder',    cook:    'cook',   repair: 'repair',
 };
 const SvcIcon = ({ id, emoji, size=40, style }) => {
   const [err, setErr] = React.useState(false);
@@ -500,7 +508,7 @@ const StarRating = ({ rating, onRate, size=28 }) => (
   </View>
 );
 
-// ✅ UPGRADE 2: 3D Icon with improved depth
+// ✅ UPGRADE 2: 3D Icon with real Icons8 Fluency images
 const Icon3D = ({ svc, onPress }) => {
   const scaleAnim = useRef(new Animated.Value(1)).current;
   const handlePress = () => {
@@ -510,6 +518,7 @@ const Icon3D = ({ svc, onPress }) => {
     ]).start(() => onPress?.());
   };
   const sz = COL - 8;
+  const iconUri = SVC_ICONS[SVC_ICON_MAP[svc.id]] || null;
   return (
     <TouchableOpacity activeOpacity={1} onPress={handlePress} style={{ width:COL, alignItems:'center', marginBottom:20 }}>
       <Animated.View style={{ transform:[{ scale:scaleAnim }], alignItems:'center' }}>
@@ -531,7 +540,9 @@ const Icon3D = ({ svc, onPress }) => {
         }}>
           {/* Top-left shine */}
           <View style={{ position:'absolute', top:7, left:7, width:sz*0.44, height:sz*0.32, borderRadius:12, backgroundColor:'rgba(255,255,255,0.28)' }}/>
-          <Text style={{ fontSize:sz*0.42, lineHeight:sz*0.52 }}>{svc.icon}</Text>
+          {iconUri
+            ? <Image source={{ uri: iconUri }} style={{ width:sz*0.58, height:sz*0.58 }} resizeMode="contain"/>
+            : <Text style={{ fontSize:sz*0.42, lineHeight:sz*0.52 }}>{svc.icon}</Text>}
         </View>
         {/* Star badge */}
         {svc.badge && (
@@ -574,6 +585,46 @@ const StepBar = ({ step, total=4, labels }) => (
 // ════════════════════════════════════════════════════════════════
 // MAIN APP
 // ════════════════════════════════════════════════════════════════
+
+// ── Mock Payment Modal (replace with real Razorpay when keys available) ──────
+const MockPayModal = ({ visible, amount, method, onSuccess }) => {
+  const [step, setStep] = React.useState(0); // 0=processing, 1=success
+  React.useEffect(() => {
+    if (!visible) { setStep(0); return; }
+    const t = setTimeout(() => setStep(1), 2400);
+    return () => clearTimeout(t);
+  }, [visible]);
+  const label = { upi:'UPI / GPay', card:'Debit / Credit Card', netbanking:'Net Banking' }[method] || method;
+  return (
+    <Modal visible={visible} transparent animationType="fade">
+      <View style={{flex:1,backgroundColor:'rgba(0,0,0,0.65)',alignItems:'center',justifyContent:'center',padding:32}}>
+        <View style={{backgroundColor:'#FFF',borderRadius:24,padding:32,width:'100%',alignItems:'center',shadowColor:'#000',shadowOpacity:0.25,shadowRadius:20,elevation:12}}>
+          {step===0?(
+            <>
+              <ActivityIndicator size="large" color="#F97316" style={{marginBottom:18}}/>
+              <Text style={{fontWeight:'700',fontSize:17,color:'#18080A',marginBottom:6}}>Processing Payment…</Text>
+              <Text style={{color:'#9D6A47',fontSize:14}}>₹{amount} via {label}</Text>
+              <Text style={{color:'#C4A07A',fontSize:11,marginTop:10}}>Please do not press back</Text>
+            </>
+          ):(
+            <>
+              <View style={{width:68,height:68,borderRadius:34,backgroundColor:'#DCFCE7',alignItems:'center',justifyContent:'center',marginBottom:16}}>
+                <Text style={{fontSize:34}}>✓</Text>
+              </View>
+              <Text style={{fontWeight:'800',fontSize:19,color:'#18080A',marginBottom:4}}>Payment Successful!</Text>
+              <Text style={{color:'#4A8A2A',fontSize:14,marginBottom:26}}>₹{amount} paid via {label}</Text>
+              <TouchableOpacity onPress={onSuccess}
+                style={{backgroundColor:'#F97316',paddingHorizontal:36,paddingVertical:15,borderRadius:28,shadowColor:'#F97316',shadowOpacity:0.45,shadowRadius:8,elevation:6}}>
+                <Text style={{color:'#FFF',fontWeight:'700',fontSize:16}}>Continue to Booking →</Text>
+              </TouchableOpacity>
+            </>
+          )}
+        </View>
+      </View>
+    </Modal>
+  );
+};
+
 export default function App() {
   const [screen,        setScreen]        = useState('splash');
   const [tab,           setTab]           = useState('home');
@@ -601,6 +652,7 @@ export default function App() {
   const [showArea,      setShowArea]      = useState(false);
   const [showTerms,     setShowTerms]     = useState(false);
   const [selPayMethod,  setSelPayMethod]  = useState('upi');
+  const [showPayModal,  setShowPayModal]  = useState(false);
   const [cart,          setCart]          = useState([]);
   const [promoCode,     setPromoCode]     = useState('');
   const [appliedPromo,  setAppliedPromo]  = useState(null);
@@ -703,6 +755,16 @@ export default function App() {
     }
   };
 
+
+  // Registers FCM token so Cloud Functions can push notifications to this customer
+  const registerCustomerFCM = async (ph) => {
+    try {
+      await messaging().requestPermission();
+      const token = await messaging().getToken();
+      if (token) await firestore().collection('users').doc(ph).set({ fcmToken: token }, { merge: true });
+    } catch(e) { console.log('Customer FCM:', e); }
+  };
+
   const verifyOTP = async()=>{
     if(!otpVal||otpVal.length<6){Alert.alert('Invalid','Please enter the 6-digit OTP');return;}
     setLoading(true);
@@ -732,6 +794,7 @@ export default function App() {
           .onSnapshot(snap=>setOrders(snap.docs.map(d=>({id:d.id,...d.data()}))),
             err=>console.error('orders:',err));
         setOrdersUnsub(()=>unsub);
+        registerCustomerFCM(phone);
         setLoading(false);
         setScreen('main');setTab('home');
         Alert.alert('🪷 Welcome back!',`Namaste ${finalUser.name}!`);
@@ -756,6 +819,7 @@ export default function App() {
           .onSnapshot(snap=>setOrders(snap.docs.map(d=>({id:d.id,...d.data()}))),
             err=>console.error('orders:',err));
         setOrdersUnsub(()=>unsub2);
+        registerCustomerFCM(phone);
         setLoading(false);
         setScreen('main');setTab('home');
         Alert.alert('🪷 Welcome!',`Namaste ${uname||'Customer'}!\n🎁 ₹200 wallet bonus added!`);
@@ -765,6 +829,12 @@ export default function App() {
       console.error('verifyOTP error:',err);
       Alert.alert('Verification Failed',err.message||'Wrong OTP. Please try again.');
     }
+  };
+
+  // Intercepts non-cash payments to show mock payment modal before booking
+  const handleConfirmBooking = () => {
+    if (selPayMethod === 'cash') { placeOrder(); return; }
+    setShowPayModal(true);
   };
 
   const placeOrder = async()=>{
@@ -791,7 +861,7 @@ export default function App() {
       setTimeout(()=>{
         const otp=Math.floor(1000+Math.random()*9000).toString();
         const oid='VG'+Date.now().toString().slice(-6);
-        const o={orderId:oid,otp,items:[...cart],total:finalTotal,slot,addr:fullAddr,status:'Confirmed',time:new Date().toLocaleString('en-IN'),professional:pro,rated:false,bookingMode:bookMode,recurFreq:bookMode==='recurring'?(recurFreq||'Weekly'):null};
+        const o={orderId:oid,otp,items:[...cart],total:finalTotal,slot,addr:fullAddr,status:'confirmed',time:new Date().toLocaleString('en-IN'),professional:pro,rated:false,bookingMode:bookMode,recurFreq:bookMode==='recurring'?(recurFreq||'Weekly'):null};
         setOrders(p=>[o,...p]);
         if(useWallet&&walletSave>0) setWallet(w=>w-walletSave);
         resetForm();
@@ -825,16 +895,18 @@ export default function App() {
         customerPhone: phone,          // ← for Firestore .where() query
         userName: user.name,
         userPhone: phone,
-        assignedWorkerId: pro.id||null,
-        assignedWorkerName: pro.name||null,
-        assignedWorkerPhone: pro.phone||null,
+        // ← NOT setting assignedWorkerId here — Hub Manager / Admin must assign
+        // professional object is only for customer-facing display
+        assignedWorkerId: null,
+        assignedWorkerName: null,
+        assignedWorkerPhone: null,
         items: cart,
         subtotal: totalPrice,
         total: finalTotal,
         promoCode: appliedPromo?.code||null,
         promoDiscount: promoSave||0,
         walletUsed: walletSave||0,
-        platformFee: 19,
+        platformFee: 29,
         slot,
         bookingMode: bookMode,
         recurFreq: bookMode==='recurring'?(recurFreq||'Weekly'):null,
@@ -868,7 +940,7 @@ export default function App() {
         items: [...cart],
         total: finalTotal,
         slot, addr: fullAddr,
-        status: 'Confirmed',
+        status: 'confirmed',
         time: new Date().toLocaleString('en-IN'),
         professional: pro,
         rated: false,
@@ -1501,11 +1573,17 @@ export default function App() {
               </TouchableOpacity>
             ))}
           </Card>
-          <TouchableOpacity style={[S.btn,{paddingVertical:18,borderRadius:30,...SHADOW.glow},placing&&{opacity:0.4}]} disabled={placing} onPress={placeOrder}>
+          <TouchableOpacity style={[S.btn,{paddingVertical:18,borderRadius:30,...SHADOW.glow},placing&&{opacity:0.4}]} disabled={placing} onPress={handleConfirmBooking}>
             {placing?<ActivityIndicator color="#FFF"/>:<Text style={[S.btnT,{fontSize:17}]}>🔒 Confirm Booking — ₹{finalTotal}</Text>}
           </TouchableOpacity>
           <View style={{height:40}}/>
         </ScrollView>
+        <MockPayModal
+          visible={showPayModal}
+          amount={finalTotal}
+          method={selPayMethod}
+          onSuccess={()=>{ setShowPayModal(false); placeOrder(); }}
+        />
       </SafeAreaView>
     );
   }
@@ -2401,10 +2479,10 @@ export default function App() {
   // 4 tabs only, gradient active state, floating with shadow
   // ════════════════════════════════════════════════════════════════
   const TABS=[
-    {id:'home',    icon:'🏠', label:'Home'},
-    {id:'services',icon:'📋', label:'Booking'},
-    {id:'offers',  icon:'🎁', label:'Offers'},
-    {id:'profile', icon:'👤', label:'Profile'},
+    {id:'home',    icon:'home',     iconOut:'home-outline',     label:'Home'},
+    {id:'services',icon:'grid',     iconOut:'grid-outline',     label:'Booking'},
+    {id:'offers',  icon:'pricetag', iconOut:'pricetag-outline', label:'Offers'},
+    {id:'profile', icon:'person',   iconOut:'person-outline',   label:'Profile'},
   ];
 
   return(
@@ -2461,7 +2539,7 @@ export default function App() {
                 backgroundColor:active?C.orange:'transparent',
                 ...(active?{...SHADOW.glow,shadowColor:C.orange}:{}),
               }} onPress={()=>setTab(t.id)}>
-                <Text style={{fontSize:20,marginBottom:1}}>{t.icon}</Text>
+                <Ionicons name={active?t.icon:t.iconOut} size={22} color={active?'#FFF':C.muted} style={{marginBottom:1}}/>
                 <Text style={{fontSize:10,fontWeight:active?'700':'500',color:active?'#FFF':C.muted}}>{t.label}</Text>
               </TouchableOpacity>
             );
@@ -2473,7 +2551,7 @@ export default function App() {
             ...(tab==='cart'?{...SHADOW.glow,shadowColor:C.orange}:{}),
           }} onPress={()=>setTab('cart')}>
             <View style={{position:'relative'}}>
-              <Text style={{fontSize:20,marginBottom:1}}>🛒</Text>
+              <Ionicons name={tab==='cart'?'cart':'cart-outline'} size={22} color={tab==='cart'?'#FFF':C.muted} style={{marginBottom:1}}/>
               {cartCount>0&&<View style={{position:'absolute',top:-5,right:-8,backgroundColor:C.red,width:16,height:16,borderRadius:8,alignItems:'center',justifyContent:'center'}}>
                 <Text style={{color:'#FFF',fontSize:9,fontWeight:'900'}}>{cartCount}</Text>
               </View>}

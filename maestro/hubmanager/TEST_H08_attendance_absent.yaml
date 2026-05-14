@@ -1,0 +1,15 @@
+# TEST_H08 — Attendance tab — mark worker Absent
+appId: com.vegavizag.hubmanager
+---
+- launchApp
+- waitForAnimationToEnd:
+    timeout: 3500
+- runFlow: "./_login_helper.yaml"
+- tapOn: "Attend"
+- waitForAnimationToEnd:
+    timeout: 3000
+- scroll
+- tapOn: "Absent"
+- waitForAnimationToEnd:
+    timeout: 2000
+- assertVisible: "Marked"

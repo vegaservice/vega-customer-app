@@ -1,0 +1,17 @@
+# TEST_C12 — One-time booking with Cash — confirms successfully
+appId: com.vegavizag.app
+---
+- launchApp
+- waitForAnimationToEnd:
+    timeout: 3500
+- runFlow: "./_login_helper.yaml"
+- tapOn: "Home Cleaning"
+- tapOn: "1 Hour"
+- tapOn: "Add to Cart"
+- tapOn: "View Cart"
+- tapOn: "Cash"
+- tapOn: "Confirm Booking"
+- waitForAnimationToEnd:
+    timeout: 8000
+- assertVisible: "Booking Confirmed"
+- assertVisible: "OTP"

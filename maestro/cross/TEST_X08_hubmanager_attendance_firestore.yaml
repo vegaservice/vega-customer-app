@@ -1,0 +1,17 @@
+# TEST_X08 — Hub Manager marks attendance → saved to Firestore
+appId: com.vegavizag.hubmanager
+---
+- launchApp
+- waitForAnimationToEnd:
+    timeout: 3500
+- runFlow: "../hubmanager/_login_helper.yaml"
+- tapOn: "Attend"
+- waitForAnimationToEnd:
+    timeout: 3000
+- scroll
+- tapOn: "Present"
+- waitForAnimationToEnd:
+    timeout: 2000
+- assertVisible: "Marked"
+# Firestore verification: workers/{id}.attendance.todayStatus = 'Present'
+# Manual: check Firebase Console

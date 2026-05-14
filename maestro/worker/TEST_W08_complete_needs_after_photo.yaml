@@ -1,0 +1,18 @@
+# TEST_W08 — Complete job — after photo required before completing
+appId: com.vegavizag.worker
+---
+- launchApp
+- waitForAnimationToEnd:
+    timeout: 3500
+- runFlow: "./_login_helper.yaml"
+- tapOn: "Active"
+- waitForAnimationToEnd
+# Find in_progress job
+- tapOn: "In Progress"
+- waitForAnimationToEnd
+- assertVisible: "Job Details"
+# Try to complete without after photos
+- tapOn: "Mark Job Complete"
+- waitForAnimationToEnd
+- assertVisible: "Photos Required"
+- assertVisible: "Upload AFTER photos first"

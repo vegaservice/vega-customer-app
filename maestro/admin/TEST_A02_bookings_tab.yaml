@@ -1,0 +1,13 @@
+# TEST_A02 — Bookings tab — confirmed bookings visible
+appId: com.vegavizag.admin
+---
+- launchApp
+- waitForAnimationToEnd:
+    timeout: 3500
+- runFlow: "./_login_helper.yaml"
+- tapOn: "Bookings"
+- waitForAnimationToEnd:
+    timeout: 3000
+- assertVisible: "Bookings"
+- assertVisible: "All"
+- assertVisible: "confirmed"

@@ -1,0 +1,21 @@
+# TEST_W07 — Upload before photo — required before starting
+appId: com.vegavizag.worker
+---
+- launchApp
+- waitForAnimationToEnd:
+    timeout: 3500
+- runFlow: "./_login_helper.yaml"
+- tapOn: "Active"
+- waitForAnimationToEnd
+- tapOn: "Assigned"
+- waitForAnimationToEnd
+- assertVisible: "BEFORE Photos"
+- tapOn: "BEFORE Photos"
+- waitForAnimationToEnd
+- assertVisible: "Before Photos"
+- assertVisible: "BEFORE photos BEFORE starting"
+- assertVisible: "Add Photo"
+- tapOn: "Add Photo"
+- waitForAnimationToEnd
+# Camera picker opens — system dialog
+- assertVisible: "Camera"

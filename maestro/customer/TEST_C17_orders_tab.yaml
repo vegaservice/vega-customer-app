@@ -1,0 +1,18 @@
+# TEST_C17 — Orders tab — confirmed booking appears
+appId: com.vegavizag.app
+---
+- launchApp
+- waitForAnimationToEnd:
+    timeout: 3500
+- runFlow: "./_login_helper.yaml"
+- tapOn: "Home Cleaning"
+- tapOn: "1 Hour"
+- tapOn: "Add to Cart"
+- tapOn: "View Cart"
+- tapOn: "Cash"
+- tapOn: "Confirm Booking"
+- waitForAnimationToEnd:
+    timeout: 8000
+- assertVisible: "Booking Confirmed"
+- tapOn: "Track Order"
+- assertVisible: "confirmed"

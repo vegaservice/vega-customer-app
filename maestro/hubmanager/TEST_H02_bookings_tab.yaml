@@ -1,0 +1,14 @@
+# TEST_H02 — Bookings tab loads all bookings
+appId: com.vegavizag.hubmanager
+---
+- launchApp
+- waitForAnimationToEnd:
+    timeout: 3500
+- runFlow: "./_login_helper.yaml"
+- tapOn: "Bookings"
+- waitForAnimationToEnd:
+    timeout: 3000
+- assertVisible: "All"
+- assertVisible: "Unassigned"
+- assertVisible: "Active"
+- assertVisible: "Completed"

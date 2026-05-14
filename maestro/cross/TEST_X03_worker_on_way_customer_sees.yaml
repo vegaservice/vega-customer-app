@@ -1,0 +1,17 @@
+# TEST_X03 — Worker On My Way → Customer sees on_the_way status
+# Firestore flow: Worker writes status=on_the_way → Customer listenToBooking fires
+appId: com.vegavizag.worker
+---
+- launchApp
+- waitForAnimationToEnd:
+    timeout: 3500
+- runFlow: "../worker/_login_helper.yaml"
+- tapOn: "Active"
+- waitForAnimationToEnd
+- tapOn: "Assigned"
+- waitForAnimationToEnd
+- tapOn: "Start Going"
+- waitForAnimationToEnd:
+    timeout: 3000
+- assertVisible: "Customer notified"
+# Customer App track screen should now show "On the Way" — verify separately

@@ -1,0 +1,21 @@
+# TEST_X01 — Customer books → appears in Admin confirmed list
+# This is a cross-app Firestore data flow test
+# Run Customer App first, then Admin App
+appId: com.vegavizag.app
+---
+- launchApp
+- waitForAnimationToEnd:
+    timeout: 3500
+- runFlow: "../customer/_login_helper.yaml"
+- tapOn: "Home Cleaning"
+- tapOn: "1 Hour"
+- tapOn: "Add to Cart"
+- tapOn: "View Cart"
+- tapOn: "Cash"
+- tapOn: "Confirm Booking"
+- waitForAnimationToEnd:
+    timeout: 8000
+# Note the order ID shown in the alert
+- assertVisible: "Booking Confirmed"
+# ↓ Now open Admin App and verify booking appears
+# (Requires manual verification or separate Admin flow)

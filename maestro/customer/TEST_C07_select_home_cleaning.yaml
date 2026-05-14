@@ -1,0 +1,14 @@
+# TEST_C07 — Select Home Cleaning — service detail opens
+appId: com.vegavizag.app
+---
+- launchApp
+- waitForAnimationToEnd:
+    timeout: 3500
+- runFlow: "./_login_helper.yaml"
+- tapOn: "Home Cleaning"
+- waitForAnimationToEnd
+# Service detail screen should show durations
+- assertVisible: "1 Hour"
+- assertVisible: "2 Hours"
+- assertVisible: "3 Hours"
+- assertVisible: "₹99"

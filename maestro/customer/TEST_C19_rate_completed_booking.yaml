@@ -1,0 +1,29 @@
+# TEST_C19 — Rate completed booking — stars + submit
+# Precondition: booking exists with status=completed
+appId: com.vegavizag.app
+---
+- launchApp
+- waitForAnimationToEnd:
+    timeout: 3500
+- runFlow: "./_login_helper.yaml"
+# Navigate to a completed booking in orders list
+- tapOn: "Bookings"
+- waitForAnimationToEnd:
+    timeout: 3000
+# Find a completed order and rate it
+- scroll
+- tapOn: "Rate this Service"
+- waitForAnimationToEnd
+- assertVisible: "Rate"
+# Tap 5 stars
+- tapOn: "★"
+- tapOn: "★"
+- tapOn: "★"
+- tapOn: "★"
+- tapOn: "★"
+- assertVisible: "Excellent"
+- tapOn: "Submit Rating"
+- waitForAnimationToEnd:
+    timeout: 3000
+- assertVisible: "Thank You"
+- assertVisible: "₹50"

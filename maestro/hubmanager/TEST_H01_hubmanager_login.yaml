@@ -1,0 +1,28 @@
+# TEST_H01 — Login with 9999999998 + OTP 123456
+appId: com.vegavizag.hubmanager
+---
+- launchApp:
+    clearState: true
+- waitForAnimationToEnd:
+    timeout: 3500
+- assertVisible: "HUB MANAGER"
+- assertVisible: "Madhurawada Operations Hub"
+- waitForAnimationToEnd:
+    timeout: 3000
+- assertVisible: "Hub Manager"
+- tapOn: "Registered number"
+- inputText: "9999999998"
+- hideKeyboard
+- tapOn: "Send OTP →"
+- waitForAnimationToEnd:
+    timeout: 5000
+- assertVisible: "Enter OTP"
+- tapOn:
+    text: "——————"
+- inputText: "123456"
+- hideKeyboard
+- tapOn: "Verify & Enter →"
+- waitForAnimationToEnd:
+    timeout: 8000
+- assertVisible: "Hub Dashboard"
+- assertVisible: "HUB MGR"

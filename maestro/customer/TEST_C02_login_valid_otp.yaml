@@ -1,0 +1,26 @@
+# TEST_C02 — Login with valid OTP (9999999999 + 123456)
+# Requires: Firebase test phone 9999999999 with code 123456 configured
+appId: com.vegavizag.app
+---
+- launchApp
+- waitForAnimationToEnd:
+    timeout: 3500
+- assertVisible: "Mobile Number"
+- tapOn: "Registered number"
+- inputText: "9999999999"
+- hideKeyboard
+- tapOn: "Send OTP"
+- waitForAnimationToEnd:
+    timeout: 5000
+- assertVisible: "Enter OTP"
+- assertVisible: "Sent to +91 9999999999"
+- tapOn:
+    text: "——————"
+- inputText: "123456"
+- hideKeyboard
+- tapOn: "Verify & Enter"
+- waitForAnimationToEnd:
+    timeout: 8000
+# Should land on main screen with VEGA Home Services
+- assertVisible: "VEGA"
+- assertVisible: "Search VEGA services..."

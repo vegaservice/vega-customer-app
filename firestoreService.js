@@ -156,6 +156,26 @@ export const submitBookingRating = async (orderId, userId, rating, note) => {
   }
 };
 
+export const cancelBooking = async (orderId, userId, reason) => {
+  try {
+    await firestore().collection('bookings').doc(orderId).update({
+      status: 'cancelled',
+      cancelledAt: firestore.FieldValue.serverTimestamp(),
+      cancelReason: reason || 'Cancelled by customer',
+    });
+    await firestore()
+      .collection('users')
+      .doc(userId)
+      .collection('bookings')
+      .doc(orderId)
+      .update({ status: 'cancelled' });
+    return { success: true };
+  } catch (error) {
+    console.error('cancelBooking error:', error);
+    return { success: false, error: error.message };
+  }
+};
+
 // Real-time booking listener
 export const listenToBooking = (orderId, callback) => {
   return firestore()

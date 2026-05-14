@@ -1,0 +1,24 @@
+# TEST_X06 — Customer books weekly recurring → 4+ docs in Firestore
+# Verifies: createBooking batch commit creates 4 child docs + 1 parent = 5 total
+appId: com.vegavizag.app
+---
+- launchApp
+- waitForAnimationToEnd:
+    timeout: 3500
+- runFlow: "../customer/_login_helper.yaml"
+- tapOn: "Home Cleaning"
+- tapOn: "1 Hour"
+- tapOn: "Add to Cart"
+- tapOn: "View Cart"
+- tapOn: "Recurring"
+- waitForAnimationToEnd
+- tapOn: "Weekly"
+- scroll
+- tapOn: "08:00 AM"
+- tapOn: "Cash"
+- tapOn: "Confirm Booking"
+- waitForAnimationToEnd:
+    timeout: 15000
+- assertVisible: "Booking Confirmed"
+# Firestore verification: check bookings collection has parentOrderId docs
+# Manual: check Firebase Console for 5 bookings with same parentOrderId

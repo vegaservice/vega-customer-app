@@ -1,8 +1,8 @@
-// ═══════════════════════════════════════════════════════════════
+// ===============================================================
 // VEGA Home Services — Firebase Cloud Functions
 // End-to-end push notification triggers for all booking events
 // Deploy: firebase deploy --only functions
-// ═══════════════════════════════════════════════════════════════
+// ===============================================================
 
 const functions = require('firebase-functions');
 const admin = require('firebase-admin');
@@ -56,22 +56,22 @@ const sendFCMMulti = async (tokens, title, body, data = {}) => {
 };
 
 // Helper: get hub manager + admin FCM tokens
+// Hub managers: workers collection with role==hub_manager
+// Admins: admins collection (e.g. admins/9441270570)
 const getHubManagerAndAdminTokens = async () => {
   const [hubSnap, adminSnap] = await Promise.all([
     db.collection('workers')
       .where('role', '==', 'hub_manager')
-      .where('isActive', '==', true)
+      .where('status', '==', 'active')
       .get(),
-    db.collection('app_config').doc('admins').get(),
+    db.collection('admins').get(),
   ]);
   const hubTokens = hubSnap.docs.map(d => d.data().fcmToken).filter(Boolean);
-  const adminTokens = adminSnap.exists
-    ? (adminSnap.data().fcmTokens || [])
-    : [];
+  const adminTokens = adminSnap.docs.map(d => d.data().fcmToken).filter(Boolean);
   return [...hubTokens, ...adminTokens];
 };
 
-// ── TRIGGER 1: New booking created ────────────────────────────────
+// ── TRIGGER 1: New booking created ──────────────────────────────
 // Notify Hub Managers + Admin when customer books a service
 exports.onNewBooking = functions.firestore
   .document('bookings/{bookingId}')
@@ -103,7 +103,7 @@ exports.onNewBooking = functions.firestore
     console.log(`New booking ${displayOrder} → notified ${tokens.length} recipients`);
   });
 
-// ── TRIGGER 2: Booking status updated ─────────────────────────────
+// ── TRIGGER 2: Booking status updated ───────────────────────────
 // Route notifications to the right person based on the new status
 exports.onBookingUpdate = functions.firestore
   .document('bookings/{bookingId}')
@@ -111,7 +111,7 @@ exports.onBookingUpdate = functions.firestore
     const before = change.before.data();
     const after = change.after.data();
 
-    if (before.status === after.status) return; // no status change
+    if (before.status === after.status) return;
 
     const {
       status, assignedWorkerId, assignedWorkerName,
@@ -123,7 +123,7 @@ exports.onBookingUpdate = functions.firestore
     const displayService = serviceType ||
       (items && items[0]?.name) || 'Home Service';
 
-    // 1. 'assigned' → notify the assigned worker
+    // 1. assigned → notify the assigned worker
     if (status === 'assigned' && assignedWorkerId) {
       const workerDoc = await db.collection('workers').doc(assignedWorkerId).get();
       const workerToken = workerDoc.exists ? workerDoc.data().fcmToken : null;
@@ -135,7 +135,7 @@ exports.onBookingUpdate = functions.firestore
       );
     }
 
-    // 2. 'on_the_way' → notify customer
+    // 2. on_the_way → notify customer
     if (status === 'on_the_way' && userId) {
       const userDoc = await db.collection('users').doc(userId).get();
       const userToken = userDoc.exists ? userDoc.data().fcmToken : null;
@@ -147,7 +147,7 @@ exports.onBookingUpdate = functions.firestore
       );
     }
 
-    // 3. 'in_progress' → notify customer
+    // 3. in_progress → notify customer
     if (status === 'in_progress' && userId) {
       const userDoc = await db.collection('users').doc(userId).get();
       const userToken = userDoc.exists ? userDoc.data().fcmToken : null;
@@ -159,7 +159,7 @@ exports.onBookingUpdate = functions.firestore
       );
     }
 
-    // 4. 'completed' → notify customer with rating prompt
+    // 4. completed → notify customer with rating prompt
     if (status === 'completed' && userId) {
       const userDoc = await db.collection('users').doc(userId).get();
       const userToken = userDoc.exists ? userDoc.data().fcmToken : null;
@@ -171,7 +171,7 @@ exports.onBookingUpdate = functions.firestore
       );
     }
 
-    // 5. 'cancelled' or 'rejected' → notify customer
+    // 5. cancelled or rejected → notify customer
     if ((status === 'cancelled' || status === 'rejected') && userId) {
       const userDoc = await db.collection('users').doc(userId).get();
       const userToken = userDoc.exists ? userDoc.data().fcmToken : null;
@@ -183,7 +183,7 @@ exports.onBookingUpdate = functions.firestore
       );
     }
 
-    // 6. Any active status → notify Hub Manager + Admin for real-time dashboard
+    // 6. Notify Hub Manager + Admin for all active status changes
     const activeStatuses = ['assigned', 'on_the_way', 'in_progress', 'completed', 'cancelled', 'rejected'];
     if (activeStatuses.includes(status)) {
       const tokens = await getHubManagerAndAdminTokens();
@@ -206,35 +206,4 @@ exports.onBookingUpdate = functions.firestore
     }
 
     console.log(`Booking ${displayOrder} status: ${before.status} → ${status}`);
-  });
-
-// ── TRIGGER 3: Worker job accepted (optional self-accept flow) ─────
-// If a worker accepts a job via self-accept, notify Hub Manager
-exports.onWorkerAccept = functions.firestore
-  .document('bookings/{bookingId}')
-  .onUpdate(async (change, context) => {
-    const before = change.before.data();
-    const after = change.after.data();
-
-    // Only fire when assignedWorkerId is newly set by the worker (not already set)
-    if (before.assignedWorkerId || !after.selfAccepted) return;
-
-    const { orderId, assignedWorkerName, serviceType, items } = after;
-    const displayOrder = orderId || context.params.bookingId.slice(-6);
-    const displayService = serviceType || (items && items[0]?.name) || 'Home Service';
-
-    const tokens = await getHubManagerAndAdminTokens();
-    if (tokens.length > 0) {
-      await sendFCMMulti(
-        tokens,
-        '🙋 Worker Self-Accepted Job',
-        `${assignedWorkerName || 'A worker'} accepted job #${displayOrder} (${displayService}).`,
-        {
-          bookingId: context.params.bookingId,
-          orderId: displayOrder,
-          type: 'worker_accepted',
-          screen: 'bookings',
-        }
-      );
-    }
   });

@@ -1,0 +1,23 @@
+# TEST_X05 — Worker completes → Customer sees completed + rating prompt
+appId: com.vegavizag.worker
+---
+- launchApp
+- waitForAnimationToEnd:
+    timeout: 3500
+- runFlow: "../worker/_login_helper.yaml"
+- tapOn: "Active"
+- waitForAnimationToEnd
+- tapOn: "In Progress"
+- waitForAnimationToEnd
+# Try to complete — needs after photo
+- tapOn: "Mark Job Complete"
+- waitForAnimationToEnd
+- assertVisible: "Photos Required"
+# Upload after photo first (simulated)
+- tapOn: "OK"
+- tapOn: "AFTER Photos"
+- waitForAnimationToEnd
+- tapOn: "Add Photo"
+- waitForAnimationToEnd
+# After photo added → complete
+# Customer App should show 'Rate this Service' button

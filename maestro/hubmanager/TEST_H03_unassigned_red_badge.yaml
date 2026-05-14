@@ -1,0 +1,13 @@
+# TEST_H03 — Unassigned bookings show red badge
+# Precondition: at least 1 booking with status=confirmed AND no assignedWorkerId
+appId: com.vegavizag.hubmanager
+---
+- launchApp
+- waitForAnimationToEnd:
+    timeout: 3500
+- runFlow: "./_login_helper.yaml"
+# Red alert banner should appear on dashboard
+- assertVisible: "Unassigned Booking"
+- assertVisible: "Assign professionals now"
+# Red badge on Bookings tab icon
+- assertVisible: "Needs Assignment"

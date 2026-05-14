@@ -1,0 +1,13 @@
+# TEST_H06 — Live location tab — shows worker location cards
+appId: com.vegavizag.hubmanager
+---
+- launchApp
+- waitForAnimationToEnd:
+    timeout: 3500
+- runFlow: "./_login_helper.yaml"
+- tapOn: "Live"
+- waitForAnimationToEnd:
+    timeout: 3000
+- assertVisible: "Live Locations"
+- assertVisible: "30-second ping"
+- assertVisible: "Tap card to open in Maps"

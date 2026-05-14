@@ -1,0 +1,16 @@
+# TEST_H10 — Logout works
+appId: com.vegavizag.hubmanager
+---
+- launchApp
+- waitForAnimationToEnd:
+    timeout: 3500
+- runFlow: "./_login_helper.yaml"
+- tapOn: "Profile"
+- waitForAnimationToEnd
+- tapOn: "Logout"
+- waitForAnimationToEnd
+- tapOn: "Logout"
+- waitForAnimationToEnd:
+    timeout: 3000
+- assertVisible: "Hub Manager"
+- assertVisible: "VEGA Operations Login"
