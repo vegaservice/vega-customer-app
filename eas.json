@@ -8,6 +8,9 @@
       "distribution": "internal",
       "android": {
         "buildType": "apk"
+      },
+      "ios": {
+        "simulator": true
       }
     },
     "preview": {
@@ -17,7 +20,8 @@
         "gradleCommand": ":app:assembleRelease"
       },
       "ios": {
-        "simulator": false
+        "simulator": false,
+        "enterpriseProvisioning": "adhoc"
       }
     },
     "production": {
@@ -34,6 +38,11 @@
       "android": {
         "serviceAccountKeyPath": "./google-play-key.json",
         "track": "internal"
+      },
+      "ios": {
+        "appleId": "mahesh.javadev@gmail.com",
+        "ascAppId": "6769142600",
+        "appleTeamId": "73RYNYV3JU"
       }
     }
   }
