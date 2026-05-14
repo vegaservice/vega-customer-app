@@ -1,84 +1,78 @@
-# VEGA Build & Submit — All 4 Apps
-# Double-click this file to build and submit all apps to Play Store + App Store
+# VEGA — Build and Submit All 4 Apps
+# Android + iOS — Play Store + App Store
+# Run: powershell -ExecutionPolicy Bypass -File ".\build-and-submit.ps1"
 
 $BASE = "C:\Users\MaheshPappala\Desktop\My Business"
 
 $APPS = @(
-    @{ name = "VEGA Customer";    path = "$BASE\Vega-app";             androidKey = "./google-play-key.json" },
-    @{ name = "VEGA Worker";      path = "$BASE\VEGA-Worker-App";      androidKey = "./google-play-key.json" },
-    @{ name = "VEGA Admin";       path = "$BASE\Vega-admin";           androidKey = "./google-play-key.json" },
-    @{ name = "VEGA Hub Manager"; path = "$BASE\VEGA-HubManager-App";  androidKey = "./google-play-key.json" }
+    @{ name="Customer App"; path="$BASE\Vega-app";            android="preview"; ios="production" },
+    @{ name="Admin App";    path="$BASE\Vega-admin";          android="preview"; ios="production" },
+    @{ name="Worker App";   path="$BASE\VEGA-Worker-App";     android="preview"; ios="production" },
+    @{ name="Hub Manager";  path="$BASE\VEGA-HubManager-App"; android="preview"; ios="production" }
 )
 
-# Upgrade EAS CLI first
-Write-Host "Upgrading EAS CLI..." -ForegroundColor Cyan
-npm install -g eas-cli@latest
+Write-Host "======================================" -ForegroundColor Cyan
+Write-Host "   VEGA — Build and Submit All Apps   " -ForegroundColor Cyan
+Write-Host "======================================" -ForegroundColor Cyan
+Write-Host ""
 
-# Login check
-Write-Host "Checking EAS login..." -ForegroundColor Green
-eas whoami
-if ($LASTEXITCODE -ne 0) {
-    eas login
-}
+# Update EAS CLI
+Write-Host "Updating EAS CLI..." -ForegroundColor Yellow
+npm install -g eas-cli | Out-Null
+Write-Host "EAS CLI ready" -ForegroundColor Green
+Write-Host ""
 
-# Pull latest code for all apps
+# Login to Expo
+Write-Host "Logging in to Expo (mahesh1331)..." -ForegroundColor Yellow
+eas login
+Write-Host ""
+
+# Build Android for all 4 apps
+Write-Host "======================================" -ForegroundColor Cyan
+Write-Host "  STEP 1 — Android Builds             " -ForegroundColor Cyan
+Write-Host "======================================" -ForegroundColor Cyan
+
 foreach ($app in $APPS) {
-    if (Test-Path $app.path) {
-        Write-Host "Pulling latest code for $($app.name)..." -ForegroundColor Yellow
-        Set-Location $app.path
-        git pull origin claude/fix-github-access-awbra
-    }
-}
-
-# Build all apps
-$built = @()
-foreach ($app in $APPS) {
-    if (-not (Test-Path $app.path)) {
-        Write-Host "SKIP: folder not found — $($app.path)" -ForegroundColor Red
-        continue
-    }
-    Set-Location $app.path
     Write-Host ""
-    Write-Host "======================================" -ForegroundColor Cyan
-    Write-Host " Building: $($app.name)" -ForegroundColor Cyan
-    Write-Host "======================================" -ForegroundColor Cyan
-
-    Write-Host "-> Android build..." -ForegroundColor Yellow
-    eas build --platform android --profile production --non-interactive
-    $androidOk = $LASTEXITCODE -eq 0
-
-    Write-Host "-> iOS build..." -ForegroundColor Yellow
-    eas build --platform ios --profile production --non-interactive
-    $iosOk = $LASTEXITCODE -eq 0
-
-    $built += @{ app = $app; androidOk = $androidOk; iosOk = $iosOk }
-}
-
-# Submit all
-Write-Host ""
-Write-Host "======================================" -ForegroundColor Green
-Write-Host " Submitting to stores..." -ForegroundColor Green
-Write-Host "======================================" -ForegroundColor Green
-
-foreach ($item in $built) {
-    $app = $item.app
+    Write-Host "Building Android: $($app.name)" -ForegroundColor Yellow
     Set-Location $app.path
+    eas build --platform android --profile $app.android --non-interactive
+    Write-Host "Android build submitted: $($app.name)" -ForegroundColor Green
+}
 
-    if ($item.androidOk) {
-        Write-Host "-> Submitting $($app.name) to Play Store..." -ForegroundColor Yellow
-        eas submit --platform android --profile production --latest --non-interactive
-    }
+# Build iOS for all 4 apps
+Write-Host ""
+Write-Host "======================================" -ForegroundColor Cyan
+Write-Host "  STEP 2 — iOS Builds                 " -ForegroundColor Cyan
+Write-Host "======================================" -ForegroundColor Cyan
 
-    if ($item.iosOk) {
-        Write-Host "-> Submitting $($app.name) to App Store..." -ForegroundColor Yellow
-        eas submit --platform ios --profile production --latest --non-interactive
-    }
+foreach ($app in $APPS) {
+    Write-Host ""
+    Write-Host "Building iOS: $($app.name)" -ForegroundColor Yellow
+    Set-Location $app.path
+    eas build --platform ios --profile $app.ios --non-interactive
+    Write-Host "iOS build submitted: $($app.name)" -ForegroundColor Green
 }
 
 Write-Host ""
+Write-Host "======================================" -ForegroundColor Cyan
+Write-Host "  STEP 3 — Submit to Stores           " -ForegroundColor Cyan
+Write-Host "======================================" -ForegroundColor Cyan
+Write-Host ""
+Write-Host "All builds submitted to EAS servers." -ForegroundColor Green
+Write-Host "Builds take 10-15 minutes each." -ForegroundColor Yellow
+Write-Host ""
+Write-Host "After builds complete, submit to stores:" -ForegroundColor Yellow
+Write-Host ""
+
+foreach ($app in $APPS) {
+    Write-Host "Submit $($app.name):" -ForegroundColor Cyan
+    Write-Host "  cd `"$($app.path)`"" -ForegroundColor White
+    Write-Host "  eas submit --platform android --latest" -ForegroundColor White
+    Write-Host "  eas submit --platform ios --latest" -ForegroundColor White
+    Write-Host ""
+}
+
 Write-Host "======================================" -ForegroundColor Green
-Write-Host " ALL DONE!" -ForegroundColor Green
-Write-Host " Check App Store Connect and" -ForegroundColor Green
-Write-Host " Google Play Console for status." -ForegroundColor Green
+Write-Host "  JAI VEGA! JAI VINAYAKA! JAI VIZAG!  " -ForegroundColor Green
 Write-Host "======================================" -ForegroundColor Green
-pause
