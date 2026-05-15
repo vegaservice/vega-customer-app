@@ -21,8 +21,7 @@
         "gradleCommand": ":app:assembleRelease"
       },
       "ios": {
-        "simulator": false,
-        "enterpriseProvisioning": "adhoc"
+        "simulator": false
       }
     },
     "production": {
