@@ -1,5 +1,6 @@
 {
   "cli": {
+    "appVersionSource": "remote",
     "version": ">= 12.0.0"
   },
   "build": {
@@ -20,8 +21,7 @@
         "gradleCommand": ":app:assembleRelease"
       },
       "ios": {
-        "simulator": false,
-        "enterpriseProvisioning": "adhoc"
+        "simulator": false
       }
     },
     "production": {
