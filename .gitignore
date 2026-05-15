@@ -6,3 +6,4 @@ GoogleService-Info.plist
 package-lock.json
 .env
 *.log
+!GoogleService-Info.plist 
