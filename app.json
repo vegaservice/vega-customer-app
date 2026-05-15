@@ -42,7 +42,8 @@
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION",
         "RECEIVE_BOOT_COMPLETED",
-        "VIBRATE"
+        "VIBRATE",
+        "POST_NOTIFICATIONS"
       ]
     },
     "web": {
@@ -51,11 +52,15 @@
     "plugins": [
       "@react-native-firebase/app",
       "@react-native-firebase/auth",
+      "@react-native-firebase/messaging",
       [
         "expo-build-properties",
         {
           "android": {
             "googleServicesFile": "./google-services.json"
+          },
+          "ios": {
+            "useModularHeaders": true
           }
         }
       ],
