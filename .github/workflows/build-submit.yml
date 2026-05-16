@@ -31,7 +31,7 @@ jobs:
       - name: Create Google Play key file
         env:
           GOOGLE_PLAY_KEY: ${{ secrets.GOOGLE_PLAY_KEY_JSON }}
-        run: echo "$GOOGLE_PLAY_KEY" > google-play-key.json
+        run: printf '%s' "$GOOGLE_PLAY_KEY" > google-play-key.json
 
       - name: Build & Submit Android
         run: eas build --platform android --profile production --non-interactive --auto-submit
@@ -58,14 +58,25 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Create App Store Connect API key file
+      - name: Write ASC API key
         env:
           ASC_KEY: ${{ secrets.ASC_API_KEY_CONTENT }}
         run: printf '%s' "$ASC_KEY" > asc-api-key.p8
 
-      - name: Build & Submit iOS
+      - name: Build iOS
         env:
           ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
           ASC_API_ISSUER_ID: ${{ secrets.ASC_API_ISSUER_ID }}
           ASC_API_KEY_PATH: ./asc-api-key.p8
-        run: eas build --platform ios --profile production --non-interactive --auto-submit
+          EXPO_ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
+          EXPO_ASC_API_ISSUER_ID: ${{ secrets.ASC_API_ISSUER_ID }}
+        run: eas build --platform ios --profile production --non-interactive
+
+      - name: Submit iOS to TestFlight
+        env:
+          ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
+          ASC_API_ISSUER_ID: ${{ secrets.ASC_API_ISSUER_ID }}
+          ASC_API_KEY_PATH: ./asc-api-key.p8
+          EXPO_ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
+          EXPO_ASC_API_ISSUER_ID: ${{ secrets.ASC_API_ISSUER_ID }}
+        run: eas submit --platform ios --profile production --non-interactive --latest
