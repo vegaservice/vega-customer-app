@@ -56,11 +56,8 @@ jobs:
       - name: Install dependencies
         run: npm install
 
+      - name: Create App Store Connect API key file
+        run: echo '${{ secrets.ASC_API_KEY_CONTENT }}' > asc-api-key.p8
+
       - name: Build & Submit iOS
-        env:
-          EXPO_APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.EXPO_APPLE_PASSWORD }}
         run: eas build --platform ios --profile production --non-interactive --auto-submit
-        env:
-          ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
-          ASC_API_ISSUER_ID: ${{ secrets.ASC_API_ISSUER_ID }}
-          ASC_API_KEY_CONTENT: ${{ secrets.ASC_API_KEY_CONTENT }}
