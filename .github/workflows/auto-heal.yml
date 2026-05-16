@@ -1,0 +1,30 @@
+name: Auto-Heal Failed Builds
+
+on:
+  workflow_run:
+    workflows: ["Build & Submit to Stores"]
+    types: [completed]
+
+jobs:
+  heal:
+    if: ${{ github.event.workflow_run.conclusion == 'failure' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install anthropic requests
+
+      - name: Run Auto-Healer
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          FAILED_RUN_ID: ${{ github.event.workflow_run.id }}
+          HEAL_RETRY_COUNT: ${{ github.event.workflow_run.run_attempt }}
+        run: python scripts/auto_heal.py
