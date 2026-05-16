@@ -29,7 +29,9 @@ jobs:
         run: npm install
 
       - name: Create Google Play key file
-        run: echo '${{ secrets.GOOGLE_PLAY_KEY_JSON }}' > google-play-key.json
+        env:
+          GOOGLE_PLAY_KEY: ${{ secrets.GOOGLE_PLAY_KEY_JSON }}
+        run: echo "$GOOGLE_PLAY_KEY" > google-play-key.json
 
       - name: Build & Submit Android
         run: eas build --platform android --profile production --non-interactive --auto-submit
@@ -57,7 +59,9 @@ jobs:
         run: npm install
 
       - name: Create App Store Connect API key file
-        run: echo '${{ secrets.ASC_API_KEY_CONTENT }}' > asc-api-key.p8
+        env:
+          ASC_KEY: ${{ secrets.ASC_API_KEY_CONTENT }}
+        run: echo "$ASC_KEY" > asc-api-key.p8
 
       - name: Build & Submit iOS
         run: eas build --platform ios --profile production --non-interactive --auto-submit
