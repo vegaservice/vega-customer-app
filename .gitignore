@@ -4,5 +4,5 @@ serviceAccountKey.json
 package-lock.json
 .env
 *.log
-! 
-!GoogleService-Info.plist 
+asc-api-key.p8
+google-play-key.json

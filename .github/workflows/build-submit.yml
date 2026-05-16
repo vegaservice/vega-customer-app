@@ -61,7 +61,11 @@ jobs:
       - name: Create App Store Connect API key file
         env:
           ASC_KEY: ${{ secrets.ASC_API_KEY_CONTENT }}
-        run: echo "$ASC_KEY" > asc-api-key.p8
+        run: printf '%s' "$ASC_KEY" > asc-api-key.p8
 
       - name: Build & Submit iOS
+        env:
+          ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
+          ASC_API_ISSUER_ID: ${{ secrets.ASC_API_ISSUER_ID }}
+          ASC_API_KEY_PATH: ./asc-api-key.p8
         run: eas build --platform ios --profile production --non-interactive --auto-submit
