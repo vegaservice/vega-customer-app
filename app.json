@@ -17,7 +17,7 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.vegavizag.app",
-      "buildNumber": "1",
+      "buildNumber": "2",
       "appleTeamId": "73RYNYV3JU",
       "googleServicesFile": "./GoogleService-Info.plist",
       "infoPlist": {
@@ -33,7 +33,7 @@
         "backgroundColor": "#E8520A"
       },
       "package": "com.vegavizag.app",
-      "versionCode": 2,
+      "versionCode": 3,
       "googleServicesFile": "./google-services.json",
       "permissions": [
         "CAMERA",
