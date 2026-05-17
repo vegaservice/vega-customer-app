@@ -28,9 +28,9 @@ jobs:
         run: npm install
 
       - name: Create Google Play key file
+        run: printf '%s' "$GOOGLE_PLAY_KEY" > google-play-key.json
         env:
           GOOGLE_PLAY_KEY: ${{ secrets.GOOGLE_PLAY_KEY_JSON }}
-        run: printf '%s' "$GOOGLE_PLAY_KEY" > google-play-key.json
 
       - name: Build & Submit Android
         run: eas build --platform android --profile production --non-interactive --auto-submit
@@ -56,16 +56,8 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Write ASC API key from base64
-        env:
-          ASC_KEY_B64: ${{ secrets.ASC_API_KEY_CONTENT_B64 }}
-        run: echo "$ASC_KEY_B64" | base64 -d > asc-api-key.p8
-
       - name: Build iOS
         run: eas build --platform ios --profile production --non-interactive
 
       - name: Submit iOS to TestFlight
-        env:
-          EXPO_APPLE_ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
-          EXPO_APPLE_ASC_API_KEY_ISSUER_ID: ${{ secrets.ASC_API_ISSUER_ID }}
         run: eas submit --platform ios --profile production --non-interactive --latest
