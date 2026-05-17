@@ -56,25 +56,16 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Write ASC API key
+      - name: Write ASC API key from base64
         env:
-          ASC_KEY: ${{ secrets.ASC_API_KEY_CONTENT }}
-        run: printf '%s' "$ASC_KEY" > asc-api-key.p8
+          ASC_KEY_B64: ${{ secrets.ASC_API_KEY_CONTENT_B64 }}
+        run: echo "$ASC_KEY_B64" | base64 -d > asc-api-key.p8
 
       - name: Build iOS
-        env:
-          ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
-          ASC_API_ISSUER_ID: ${{ secrets.ASC_API_ISSUER_ID }}
-          ASC_API_KEY_PATH: ./asc-api-key.p8
-          EXPO_ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
-          EXPO_ASC_API_ISSUER_ID: ${{ secrets.ASC_API_ISSUER_ID }}
         run: eas build --platform ios --profile production --non-interactive
 
       - name: Submit iOS to TestFlight
         env:
-          ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
-          ASC_API_ISSUER_ID: ${{ secrets.ASC_API_ISSUER_ID }}
-          ASC_API_KEY_PATH: ./asc-api-key.p8
-          EXPO_ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
-          EXPO_ASC_API_ISSUER_ID: ${{ secrets.ASC_API_ISSUER_ID }}
+          EXPO_APPLE_ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
+          EXPO_APPLE_ASC_API_KEY_ISSUER_ID: ${{ secrets.ASC_API_ISSUER_ID }}
         run: eas submit --platform ios --profile production --non-interactive --latest
