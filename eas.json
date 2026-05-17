@@ -29,8 +29,7 @@
       "ios": {
         "appleId": "mahesh.javadev@gmail.com",
         "ascAppId": "6769142600",
-        "appleTeamId": "73RYNYV3JU",
-        "ascApiKeyPath": "./asc-api-key.p8"
+        "appleTeamId": "73RYNYV3JU"
       }
     }
   }
