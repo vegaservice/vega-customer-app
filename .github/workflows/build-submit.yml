@@ -28,7 +28,7 @@ jobs:
         run: npm install
 
       - name: Create Google Play key file
-        run: echo $GOOGLE_PLAY_KEY > google-play-key.json
+        run: printf '%s' "$GOOGLE_PLAY_KEY" > google-play-key.json
         env:
           GOOGLE_PLAY_KEY: ${{ secrets.GOOGLE_PLAY_KEY_JSON }}
 
