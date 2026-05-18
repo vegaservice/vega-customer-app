@@ -11,11 +11,13 @@
       "resizeMode": "contain",
       "backgroundColor": "#1A0800"
     },
-    "assetBundlePatterns": ["**/*"],
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.vegavizag.app",
-      "buildNumber": "4",
+      "buildNumber": "5",
       "appleTeamId": "73RYNYV3JU",
       "googleServicesFile": "./GoogleService-Info.plist",
       "infoPlist": {
@@ -31,7 +33,7 @@
         "backgroundColor": "#E8520A"
       },
       "package": "com.vegavizag.app",
-      "versionCode": 4,
+      "versionCode": 5,
       "googleServicesFile": "./google-services.json",
       "permissions": [
         "CAMERA",
@@ -44,7 +46,9 @@
         "POST_NOTIFICATIONS"
       ]
     },
-    "web": { "favicon": "./assets/favicon.png" },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
     "plugins": [
       "@react-native-firebase/app",
       "@react-native-firebase/messaging",
@@ -56,12 +60,23 @@
             "targetSdkVersion": 35,
             "compileSdkVersion": 35
           },
-          "ios": { "useFrameworks": "static" }
+          "ios": {
+            "useFrameworks": "static"
+          }
         }
       ],
-      ["expo-notifications", { "icon": "./assets/notification-icon.png" }]
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/notification-icon.png"
+        }
+      ]
     ],
-    "extra": { "eas": { "projectId": "a2cb81a3-7b99-49f5-9ec4-6ace8e81d762" } },
+    "extra": {
+      "eas": {
+        "projectId": "a2cb81a3-7b99-49f5-9ec4-6ace8e81d762"
+      }
+    },
     "owner": "mahesh1331"
   }
 }
