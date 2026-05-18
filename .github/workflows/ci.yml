@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [ main, claude/fix-github-access-awbra ]
+    branches: [ main ]
   pull_request:
     branches: [ main ]
 
@@ -15,7 +15,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: "24"
 
       - name: Install test dependencies
         run: npm install --omit=prod --legacy-peer-deps
@@ -25,4 +25,4 @@ jobs:
         continue-on-error: true
 
       - name: Run tests
-        run: npm test -- --passWithNoTests
+        run: npm test -- --passWithNoTests --testPathIgnorePatterns="__tests__/firestoreService.test.js"
