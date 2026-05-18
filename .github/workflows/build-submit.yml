@@ -5,6 +5,10 @@ on:
     branches: [main]
   workflow_dispatch:
 
+concurrency:
+  group: store-submission
+  cancel-in-progress: true
+
 jobs:
   build-android:
     name: Android - Build and Submit
