@@ -825,8 +825,36 @@ export default function App() {
       Animated.timing(fadeA,  {toValue:1,duration:1400,useNativeDriver:true}),
       Animated.spring(scaleA, {toValue:1,tension:35,friction:9,useNativeDriver:true}),
     ]).start();
-    const t=setTimeout(()=>setScreen('main'),3400);
-    return ()=>clearTimeout(t);
+    // ── Session Restore — keep user logged in between app opens ──
+    const unsubAuth = auth().onAuthStateChanged(async(fUser) => {
+      if(fUser){
+        try{
+          const ph = fUser.phoneNumber?.replace('+91','');
+          if(ph){
+            setPhone(ph);
+            const existingUser = await getUser(ph);
+            if(existingUser){
+              const finalUser = {
+                name: existingUser.name||'Customer',
+                phone: `+91${ph}`,
+                code: existingUser.referralCode||('VG'+Math.random().toString(36).substr(2,5).toUpperCase()),
+                walletBalance: existingUser.walletBalance||0,
+              };
+              setUser(finalUser);
+              setWallet(existingUser.walletBalance||0);
+              const unsub = firestore().collection('bookings')
+                .where('userId','==',ph).orderBy('createdAt','desc').limit(50)
+                .onSnapshot(snap=>setOrders(snap.docs.map(d=>({id:d.id,...d.data()}))),
+                  err=>console.error('orders:',err));
+              setOrdersUnsub(()=>unsub);
+              registerCustomerFCM(ph);
+            }
+          }
+        }catch(e){ console.log('session restore:',e); }
+      }
+      setScreen('main'); // always show home — login required only to book
+    });
+    return ()=>unsubAuth();
   },[]);
 
   // ── Live worker location listener ─────────────────────────────────
