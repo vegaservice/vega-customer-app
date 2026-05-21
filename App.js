@@ -25,6 +25,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import messaging from '@react-native-firebase/messaging';
+import { WebView } from 'react-native-webview';
 
 // ── FONT SETUP ────────────────────────────────────────────────────
 // Uncomment after: expo install @expo-google-fonts/fraunces expo-font
@@ -77,37 +78,9 @@ const createBooking = async (bookingData) => {
         .set({ orderId, status: 'confirmed', createdAt: firestore.FieldValue.serverTimestamp() });
     }
 
-    // ── RECURRING BOOKINGS — create future occurrences in Firestore
-    if (bookingData.bookingMode === 'recurring' && bookingData.recurFreq && bookingData.scheduledDate) {
-      const freqDays = { 'Weekly': 7, 'Biweekly': 14, 'Monthly': 30 };
-      const days = freqDays[bookingData.recurFreq] || 7;
-      const occurrences = bookingData.recurFreq === 'Monthly' ? 3 : 4; // 4 weeks or 3 months ahead
-      const baseDate = new Date(bookingData.scheduledDate);
-
-      const batch = firestore().batch();
-      for (let i = 1; i <= occurrences; i++) {
-        const nextDate = new Date(baseDate);
-        nextDate.setDate(baseDate.getDate() + (days * i));
-        const nextDateStr = nextDate.toISOString().split('T')[0];
-        const nextOrderId = 'VG' + (Date.now() + i * 1000).toString().slice(-6);
-        const nextSlot = `Every ${bookingData.recurFreq} · ${nextDate.toLocaleDateString('en-IN', { weekday:'short', day:'numeric', month:'short' })} at ${bookingData.scheduledTime}`;
-        const nextRef = firestore().collection('bookings').doc(nextOrderId);
-        batch.set(nextRef, {
-          ...bookingData,
-          orderId: nextOrderId,
-          otp: Math.floor(1000 + Math.random() * 9000).toString(),
-          status: 'confirmed',
-          scheduledDate: nextDateStr,
-          slot: nextSlot,
-          parentOrderId: orderId, // links to first booking
-          isRecurringChild: true,
-          recurIndex: i,
-          createdAt: firestore.FieldValue.serverTimestamp(),
-          rated: false,
-        });
-      }
-      await batch.commit();
-    }
+    // ── Change 3: Recurring child docs are NOT auto-created here.
+    // They are created ONLY after full upfront payment succeeds (see placeOrder).
+    // This prevents unpaid recurring bookings from appearing in Firestore.
 
     return { success: true, orderId, otp, booking };
   } catch (e) { console.error('createBooking:', e); return { success: false, error: e.message }; }
@@ -161,7 +134,7 @@ const SVC_ICONS = {
   cleaning: 'https://img.icons8.com/3d-fluency/128/broom.png',
   bathroom: 'https://img.icons8.com/3d-fluency/128/bathroom.png',
   kitchen:  'https://img.icons8.com/3d-fluency/128/stove.png',
-  car:      'https://img.icons8.com/3d-fluency/128/car-wash.png',
+  car:      'https://img.icons8.com/3d-fluency/128/car.png',
   sofa:     'https://img.icons8.com/3d-fluency/128/sofa.png',
   beauty:   'https://img.icons8.com/3d-fluency/128/beauty.png',
   vacuum:   'https://img.icons8.com/3d-fluency/128/vacuum-cleaner.png',
@@ -260,9 +233,10 @@ const FONT = {
 
 // ── Shadow presets — 3 levels
 const SHADOW = {
-  card: { elevation:3, shadowColor:C.shadowCard, shadowOffset:{width:0,height:2}, shadowOpacity:0.12, shadowRadius:6 },
-  soft: { elevation:6, shadowColor:C.shadowSoft, shadowOffset:{width:0,height:4}, shadowOpacity:0.18, shadowRadius:10 },
-  glow: { elevation:10, shadowColor:C.shadowGlow, shadowOffset:{width:0,height:6}, shadowOpacity:0.38, shadowRadius:16 },
+  card:     { elevation:3,  shadowColor:C.shadowCard, shadowOffset:{width:0,height:2},  shadowOpacity:0.12, shadowRadius:6  },
+  soft:     { elevation:6,  shadowColor:C.shadowSoft, shadowOffset:{width:0,height:4},  shadowOpacity:0.18, shadowRadius:10 },
+  glow:     { elevation:10, shadowColor:C.shadowGlow, shadowOffset:{width:0,height:6},  shadowOpacity:0.38, shadowRadius:16 },
+  floating: { elevation:12, shadowColor:'rgba(0,0,0,0.18)', shadowOffset:{width:0,height:-3}, shadowOpacity:0.15, shadowRadius:10 },
 };
 
 const PROMOS = {
@@ -308,15 +282,75 @@ const SERVICES = [
     covered:['Mopping & sweeping all rooms','Kitchen counter & utensil cleaning','Surface dusting — tables, shelves','Clothes folding and ironing (included in 2hr & 3hr)','Bathroom exterior wipe (not deep clean)'],
     notCovered:['Bathroom deep cleaning — book Bathroom Cleaning separately','Outside window glass cleaning','Sofa or carpet cleaning — book separately','Moving heavy furniture','Pest control or repairs','Cooking or food preparation'],
   },
-  { id:'bathroom',name:'Bathroom\nCleaning',shortName:'Bathroom',icon:'🚿',gradient:['#2C88D9','#183880'],shadow:'rgba(24,56,128,0.4)',iconBg:'#4A98E8',tagline:'Tiles, commode, mirror & taps',workerLabel:'Cleaners',badge:'High Demand',
+  { id:'bathroom', name:'Bathroom\nCleaning', shortName:'Bathroom Cleaning', icon:'🚿', gradient:['#2C88D9','#183880'], shadow:'rgba(24,56,128,0.4)', iconBg:'#4A98E8', tagline:'Deep scrub — tiles, commode, mirror & taps', workerLabel:'Cleaners', badge:'High Demand',
     durations:[
-      {id:'b1',hrs:1,label:'1 Bath',  price:149,mrp:299,popular:true, tasks:['Commode inside+out','Tile scrub','Mirror zero-streak','Drain deodorize'],note:'1 bathroom'},
-      {id:'b2',hrs:2,label:'2 Baths', price:249,mrp:499,popular:false,tasks:['All above × 2'],note:'2 bathrooms'},
-      {id:'b3',hrs:3,label:'3+ Baths',price:349,mrp:699,popular:false,tasks:['All above × 3+'],note:'3+ bathrooms'},
+      { id:'b1', hrs:1, label:'1 Bathroom', price:149, mrp:299, popular:true,
+        tasks:[
+          'Toilet scrubbing and disinfection with Harpic',
+          'Wash basin cleaning and polishing',
+          'Floor scrubbing and mopping',
+          'Mirror cleaning with Colin spray (streak-free finish)',
+          'Wall tiles wiping and cleaning',
+          'Tap and fitting polishing',
+          'Exhaust fan cleaning',
+          'Dustbin cleaning and sanitization',
+          'Final smell check — bathroom smells of Harpic when done',
+        ],
+        notIncluded:[
+          'Bathroom renovation or painting',
+          'Plumbing repairs or unclogging',
+          'Geyser or water heater repairs',
+          'Waterproofing or tile work',
+          'Outside the bathroom area',
+        ],
+        note:'1 bathroom — complete deep clean',
+      },
+      { id:'b2', hrs:2, label:'2 Bathrooms', price:249, mrp:499, popular:false,
+        tasks:[
+          'Both toilets scrubbed and disinfected with Harpic',
+          'Both wash basins cleaned and polished',
+          'Both bathroom floors scrubbed and mopped',
+          'Both mirrors cleaned with Colin (streak-free)',
+          'All wall tiles in both bathrooms wiped',
+          'All taps and fittings in both bathrooms polished',
+          'Both exhaust fans cleaned',
+          'Both dustbins cleaned and sanitized',
+          'Final smell check on both bathrooms',
+        ],
+        notIncluded:[
+          'Bathroom renovation or painting',
+          'Plumbing repairs or unclogging',
+          'Geyser or water heater repairs',
+          'Waterproofing or tile work',
+          'Outside the bathroom area',
+        ],
+        note:'2 bathrooms — every item done in both',
+      },
+      { id:'b3', hrs:3, label:'3+ Bathrooms', price:349, mrp:699, popular:false,
+        tasks:[
+          'All 3+ toilets scrubbed and disinfected with Harpic',
+          'All wash basins cleaned and polished',
+          'All bathroom floors scrubbed and mopped',
+          'All mirrors cleaned with Colin (streak-free)',
+          'All wall tiles in every bathroom wiped',
+          'All taps and fittings polished',
+          'All exhaust fans cleaned',
+          'All dustbins cleaned and sanitized',
+          'Final smell check — all bathrooms',
+        ],
+        notIncluded:[
+          'Bathroom renovation or painting',
+          'Plumbing repairs or unclogging',
+          'Geyser or water heater repairs',
+          'Waterproofing or tile work',
+          'Outside the bathroom area',
+        ],
+        note:'3 or more bathrooms',
+      },
     ],
-    addons:[{id:'descale',name:'Hard Water Descaling',price:49,icon:'💧',desc:'Remove yellow stains'},{id:'exhaust',name:'Exhaust Fan Clean',price:29,icon:'🌀',desc:'Fan blades and grill'}],
-    covered:['Commode inside & outside — deep scrub','Wall & floor tiles — scrubbed clean','Mirror — streak-free polish','Taps & shower heads — descaled','Drain — cleaned & deodorized','Exhaust fan exterior wipe'],
-    notCovered:['Broken tile or grout repair','Plumbing leaks or pipe repair','Painting or renovation work','Electrical work'],
+    addons:[{id:'descale',name:'Hard Water Descaling',price:49,icon:'💧',desc:'Remove yellow stains'},{id:'exhaust',name:'Exhaust Fan Clean (extra)',price:29,icon:'🌀',desc:'Additional exhaust fans beyond bathrooms'}],
+    covered:['Toilet/commode inside & outside — deep scrub with Harpic','Wall & floor tiles — scrubbed clean','Mirror — streak-free polish with Colin','Taps & fittings — polished','Wash basin — cleaned & polished','Exhaust fan cleaning','Dustbin cleaning & sanitization'],
+    notCovered:['Bathroom renovation or painting','Plumbing repairs or unclogging','Geyser or water heater repairs','Waterproofing or tile work','Areas outside the bathroom'],
   },
   { id:'kitchen', name:'Kitchen\nCleaning',shortName:'Kitchen', icon:'🍳',gradient:['#E87030','#A84A10'],shadow:'rgba(168,74,16,0.4)',iconBg:'#E88040',tagline:'Stove, chimney, counters & sink',workerLabel:'Cleaners',badge:null,
     durations:[
@@ -332,15 +366,38 @@ const SERVICES = [
     covered:['Stove burners & top','Counter scrub','Sink descaling & shine','Cabinet exterior','Chimney exterior','Kitchen floor mopping'],
     notCovered:['Gas pipe repair or replacement','Plumbing issues','Pest control','Electrical appliance repair','Inside refrigerator (book Fridge add-on separately)'],
   },
-  { id:'car',     name:'Car\nWash',      shortName:'Car Wash',  icon:'🚗',gradient:['#18A888','#0E5848'],shadow:'rgba(14,88,72,0.4)', iconBg:'#28C8A8',tagline:'Parking area service — no moving needed',workerLabel:'Detailers',badge:'Eco Friendly',
+  { id:'car', name:'Car\nCleaning', shortName:'Car Cleaning', icon:'🚗', gradient:['#18A888','#0E5848'], shadow:'rgba(14,88,72,0.4)', iconBg:'#28C8A8', tagline:'Dry waterless cleaning — no water spraying', workerLabel:'Detailers', badge:'Eco Friendly',
+    // carType: 'hatchback' | 'sedan' | 'suv'  — selected dynamically in step1
+    carPricing:{
+      single:   {hatchback:100, sedan:130, suv:160},
+      weekly:   {hatchback:299, sedan:399, suv:399},
+      monthly:  {hatchback:499, sedan:649, suv:649},
+    },
+    carExamples:{
+      hatchback:'Swift, Alto, i10, WagonR, Baleno',
+      sedan:    'City, Verna, Ciaz, Dzire',
+      suv:      'Creta, Seltos, Brezza, XUV300',
+    },
     durations:[
-      {id:'c1',hrs:1,label:'Outer Wash',    price:99, mrp:199,popular:false,tasks:['Exterior body wash — foam & rinse','Tyre & rim cleaning','Wipe dry with microfibre','Exterior glass clean'],note:'Exterior only — great for daily refresh'},
-      {id:'c2',hrs:2,label:'Full Clean',    price:199,mrp:349,popular:true, tasks:['All Outer Wash tasks','Interior vacuum — seats, floor mats, boot','Dashboard & door panel wipe','Interior glass cleaning','Cup holders & pockets cleaned'],note:'Best — inside & outside complete clean'},
-      {id:'c3',hrs:3,label:'Premium Detail',price:349,mrp:599,popular:false,tasks:['All Full Clean tasks','Clay bar exterior treatment','Hand wax & polish','Tyre dressing (showroom black)','Headlight restoration'],note:'Showroom-finish detailing'},
+      { id:'c1', label:'Single Clean (Outer Body)', price:100, mrp:200, popular:false,
+        duration:'20–30 mins',
+        tasks:['Full outer body cleaning (doors, bonnet, boot)','All headlights & tail lights cleaned and shiny','All mirrors cleaned (streak-free)','Tyre surface wiped and cleaned','Window glass cleaned (outer side)','Number plate cleaned'],
+        note:'Exterior only — great for a quick refresh',
+      },
+      { id:'c2', label:'Weekly Cleaning (Outer × 4/month)', price:299, mrp:499, popular:true,
+        duration:'20–30 mins per visit',
+        tasks:['Everything in Single Clean × 4 times per month','Same professional each visit','Same day & time every week (you choose once)','Automatic scheduling — no need to book each week'],
+        note:'Full month upfront — hassle-free weekly service',
+      },
+      { id:'c3', label:'Monthly Premium (Outer + Inner)', price:499, mrp:799, popular:false,
+        duration:'Outer 20–30 min · Inner 60 min (once)',
+        tasks:['Outer body cleaning every week (4 visits/month)','1 inner cabin deep clean per month','Dashboard wiped & polished','All seats wiped','Door panels cleaned','Floor mats cleaned','Centre console wiped','Tyre cleaning every outer visit'],
+        note:'Full month upfront — complete premium care',
+      },
     ],
-    addons:[], // Car wash has no add-ons
-    covered:['Exterior wash & dry','Tyre & rim cleaning','Interior vacuum','Dashboard wipe','All glass inside + outside'],
-    notCovered:['Boot or glove box (unless requested)','Dent or scratch repair','Engine bay cleaning','AC gas or servicing','Moving your car from parking'],
+    addons:[],
+    covered:['Full outer body (dry/waterless method)','Headlights, tail lights, mirrors','Tyres & number plate','Outer window glass','Inner cabin (Monthly Premium package only)'],
+    notCovered:['Water spraying — we use waterless method only','Inside cabin cleaning (Single / Weekly packages)','Under the car or engine bay','Dent or scratch repair','AC gas or servicing','Moving your car from parking'],
   },
   { id:'sofa',    name:'Sofa\nCleaning', shortName:'Sofa Clean', icon:'🛋️',gradient:['#7840C8','#4E2480'],shadow:'rgba(78,36,128,0.4)',iconBg:'#9860E0',tagline:'Foam clean, stain removal & deodorize',workerLabel:'Specialists',badge:null,
     durations:[
@@ -427,8 +484,23 @@ const TASKS = [
     includes:['Inside glass wipe — streak-free finish','Window sill cleaning','Grill dust removal (reachable)','Window frame wiping','Final polish with dry cloth'],
     excludes:['Outside glass of high-floor windows','Work requiring ladders or safety harness','Broken glass replacement or repair','Cleaning curtains or blinds','Exterior grill painting or restoration']},
   {id:'t_utensils', name:'Utensils Washing', price:49, mrp:99, icon:'🍽️', color:'#E88040', desc:'All utensils washed & dried', unit:'session',
-    includes:['Washing regular household utensils','Scrubbing and cleaning the kitchen sink','Cleaning burners and wiping stove top','Disposing wet and dry kitchen waste','Leaving sink area clean and dry'],
-    excludes:['Chimney, degreasing, or duct cleaning','Cleaning inside of electrical appliances','Heavy scrubbing of burnt or old deposits','Handling broken glass or sharp waste','Special cookware handling (non-stick coatings need care)']},
+    includes:[
+      'Scrubbing and cleaning all utensils (plates, cups, bowls, glasses)',
+      'Scrubbing pots, pans, pressure cookers, kadai',
+      'Cleaning the kitchen sink thoroughly',
+      'Cleaning all burners on the stove',
+      'Wiping the stove top surface',
+      'Leaving the sink area clean and completely dry',
+      'Cleaning any dishes left soaking',
+    ],
+    excludes:[
+      'Cooking or food preparation',
+      'Buying cleaning supplies or soap',
+      'Washing clothes or other items',
+      'Moving heavy appliances or furniture',
+      'Appliance repair or servicing',
+      'Items outside the kitchen sink area',
+    ]},
   {id:'t_sofa', name:'Sofa Cleaning', price:249, mrp:449, icon:'🛋️', color:'#9860E0', desc:'Foam clean + stain removal', unit:'sofa',
     includes:['Foam extraction cleaning (professional method)','Stain pre-treatment and removal','Cushion top surface cleaning','Deodorizing with fresh spray','Surface dry within 2 hours'],
     excludes:['Torn or ripped fabric repair','Wooden frame polishing or repair','Structural damage fixes','Pet urine deep saturation (may need extra session)','Antique or leather sofas (call us first)']},
@@ -438,12 +510,73 @@ const TASKS = [
   {id:'t_wm', name:'Washing Machine Clean', price:99, mrp:199, icon:'🫧', color:'#183880', desc:'Drum + exterior cleaning', unit:'machine',
     includes:['Cleaning drum interior','Wiping rubber gasket thoroughly','Cleaning detergent drawer','Exterior wipe-down of machine','Running a cleaning cycle with cleaner'],
     excludes:['Repair of motor or electronic parts','Drainage pipe deep unclog','Descaling very old heavy buildup','Moving the machine from position','Any servicing needing dismantling']},
-  {id:'t_chimney', name:'Chimney Cleaning', price:99, mrp:249, icon:'🔧', color:'#A84A10', desc:'Filter/mesh removed & cleaned', unit:'chimney',
-    includes:['Removing filter/mesh carefully','Soaking and scrubbing filter','Wiping chimney exterior and hood','Cleaning around chimney area','Refitting filter properly'],
-    excludes:['Duct or exhaust pipe cleaning','Motor or blower repair','Full chimney dismantling','Heavy oil buildup needing chemicals','Any electrical work on chimney']},
-  {id:'t_mattress', name:'Mattress Cleaning', price:149, mrp:299, icon:'🛏️', color:'#4E2480', desc:'Vacuum + sanitize + deodorize', unit:'mattress',
-    includes:['Deep vacuuming of mattress surface','Stain spot treatment on accessible stains','Sanitizing spray application','Deodorizing with fresh-smelling solution','Flipping mattress if requested'],
-    excludes:['Mattress repair or bedbug extermination','Dry cleaning of mattress covers','Removing set-in stains (older than 6 months)','Disposal of old mattress','Replacement of mattress padding']},
+];
+
+// ─── COMING SOON — not yet operational ──────────────────────────────────────
+const COMING_SOON_TASKS = [
+  {id:'cs_chimney',  name:'Chimney Cleaning',  emoji:'🔧', color:'#A84A10', desc:'Deep filter & mesh cleaning'},
+  {id:'cs_mattress', name:'Mattress Cleaning',  emoji:'🛏️', color:'#4E2480', desc:'Vacuum + sanitize + deodorize'},
+  {id:'cs_sofa_deep',name:'Sofa Deep Cleaning', emoji:'🛋️', color:'#9860E0', desc:'Foam extraction & stain removal'},
+];
+
+// ─── HOME CLEANING: 7 Task-Based Packages ────────────────────────────────────
+const HOME_PACKAGES = [
+  { id:'hp1',
+    name:'Floor Cleaning + Wet Mopping + Utensils',
+    icon:'https://img.icons8.com/3d-fluency/128/broom.png',
+    emoji:'🧹',
+    desc:'Sweeping all rooms, wet mopping all floors, washing all utensils and dishes, cleaning sink',
+    mrp:250, price:99, popular:true, badge:'MOST BOOKED', color:'#C8541A', canSubscribe:true,
+    includes:['Sweeping all rooms','Wet mopping all floors','Washing all utensils and dishes','Cleaning kitchen sink thoroughly','Leaving sink area clean and dry'],
+  },
+  { id:'hp2',
+    name:'Floor Cleaning + Wet Mopping',
+    icon:'https://img.icons8.com/3d-fluency/128/mop.png',
+    emoji:'🧺',
+    desc:'Sweeping all rooms and wet mopping all floors',
+    mrp:149, price:69, popular:false, badge:null, color:'#2C88D9', canSubscribe:true,
+    includes:['Sweeping all rooms','Wet mopping all floors with clean water'],
+  },
+  { id:'hp3',
+    name:'Utensils Cleaning Only',
+    icon:'https://img.icons8.com/3d-fluency/128/dishwasher.png',
+    emoji:'🍽️',
+    desc:'Washing all utensils, scrubbing pots and pans, cleaning sink, leaving sink area dry',
+    mrp:99, price:59, popular:false, badge:null, color:'#E87030', canSubscribe:false,
+    includes:['Washing all utensils (plates, cups, bowls, glasses)','Scrubbing pots, pans, pressure cooker, kadai','Cleaning kitchen sink thoroughly','Leaving sink area clean and completely dry','Cleaning dishes left soaking'],
+  },
+  { id:'hp4',
+    name:'Basic Kitchen Cleaning',
+    icon:'https://img.icons8.com/3d-fluency/128/kitchen.png',
+    emoji:'🍳',
+    desc:'Wiping countertops, cleaning visible surfaces, basic tidying of kitchen area',
+    mrp:59, price:25, popular:false, badge:null, color:'#A84A10', canSubscribe:false,
+    includes:['Wiping all countertops','Cleaning visible surfaces','Basic tidying of kitchen area'],
+  },
+  { id:'hp5',
+    name:'Kitchen Cupboard Cleaning',
+    icon:'https://img.icons8.com/3d-fluency/128/cupboard.png',
+    emoji:'🗄️',
+    desc:'Wiping cupboard exteriors, removing dust, cleaning handles and knobs',
+    mrp:59, price:25, popular:false, badge:null, color:'#4E2480', canSubscribe:false,
+    includes:['Wiping cupboard exteriors','Removing dust from top and sides','Cleaning handles and knobs'],
+  },
+  { id:'hp6',
+    name:'Stove Cleaning',
+    icon:'https://img.icons8.com/3d-fluency/128/gas-stove.png',
+    emoji:'🔥',
+    desc:'Cleaning all burners, wiping stove top, removing grease and food residue',
+    mrp:59, price:25, popular:false, badge:null, color:'#D84020', canSubscribe:false,
+    includes:['Cleaning all burners','Wiping stove top surface','Removing grease and food residue'],
+  },
+  { id:'hp7',
+    name:'Refrigerator Cleaning',
+    icon:'https://img.icons8.com/3d-fluency/128/fridge.png',
+    emoji:'❄️',
+    desc:'Wiping exterior and door seals, cleaning top, basic interior wipe, cleaning handle',
+    mrp:99, price:59, popular:false, badge:null, color:'#183880', canSubscribe:false,
+    includes:['Wiping exterior surfaces','Cleaning door seals and gaskets','Cleaning top of fridge','Basic interior wipe','Cleaning handle'],
+  },
 ];
 const getDates=()=>{const D=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'],M=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'],t=new Date();return Array.from({length:7},(_,i)=>{const d=new Date(t);d.setDate(t.getDate()+i);return{label:i===0?'Today':i===1?'Tomorrow':D[d.getDay()],num:d.getDate(),mon:M[d.getMonth()]};});};
 const TIMES=['8:00 AM','9:00 AM','10:00 AM','11:00 AM','12:00 PM','1:00 PM','2:00 PM','3:00 PM','4:00 PM','5:00 PM','6:00 PM'];
@@ -667,8 +800,22 @@ export default function App() {
   const [ratingOrd,     setRatingOrd]     = useState(null);
   const [userRating,    setUserRating]    = useState(0);
   const [ratingNote,    setRatingNote]    = useState('');
+  const [workerLoc,     setWorkerLoc]     = useState(null); // {lat, lng} live GPS
+  // ── Change 1: Home Cleaning multi-package cart
+  const [selPkgs,       setSelPkgs]       = useState({}); // {packageId: true}
+  // ── Change 3: Recurring duration
+  const [recurDuration, setRecurDuration] = useState('1month'); // '1month'|'3months'|'6months'
+  // ── Change 4: Calendar date selection
+  const [calMonth,      setCalMonth]      = useState(new Date()); // current month displayed
+  const [calSelDate,    setCalSelDate]    = useState(null); // Date object
+  // ── Change 6: Car type selector
+  const [carType,       setCarType]       = useState('hatchback'); // 'hatchback'|'sedan'|'suv'
+  // ── Change 9: Inline OTP/phone errors
+  const [phoneError,    setPhoneError]    = useState('');
+  const [otpError,      setOtpError]      = useState('');
 
   const fadeA  = useRef(new Animated.Value(0)).current;
+  const trackMapRef = useRef(null); // WebView ref for live map
   const scaleA = useRef(new Animated.Value(0.85)).current;
   const tabAnim = useRef(new Animated.Value(0)).current;
   const DATES  = getDates();
@@ -682,14 +829,40 @@ export default function App() {
     return ()=>clearTimeout(t);
   },[]);
 
+  // ── Live worker location listener ─────────────────────────────────
+  useEffect(()=>{
+    const wid = trackOrd?.assignedWorkerId;
+    if(!wid){ setWorkerLoc(null); return; }
+    const unsub = firestore().collection('workers').doc(wid)
+      .onSnapshot(doc=>{
+        const d = doc.data();
+        if(d?.lastLat && d?.lastLng){
+          const newLoc = {lat: d.lastLat, lng: d.lastLng};
+          setWorkerLoc(newLoc);
+          // Inject JS to smoothly move the marker without full reload
+          if(trackMapRef.current){
+            trackMapRef.current.injectJavaScript(
+              `if(window.workerMarker){ window.workerMarker.setLatLng([${d.lastLat},${d.lastLng}]); window.liveMap.panTo([${d.lastLat},${d.lastLng}], {animate:true, duration:1}); } true;`
+            );
+          }
+        }
+      });
+    return ()=>unsub();
+  },[trackOrd?.assignedWorkerId]);
+
   const addonTotal  = selAddons.reduce((s,id)=>{const a=selSvc?.addons?.find(x=>x.id===id);return s+(a?a.price:0);},0);
   const unitPrice   = selDur?selDur.price:0;
   const totalPrice  = unitPrice + addonTotal;
   const cartTotal   = cart.reduce((s,i)=>s+i.price,0);
   const cartCount   = cart.length;
-  const promoSave   = appliedPromo?appliedPromo.type==='pct'?Math.round(cartTotal*appliedPromo.val/100):appliedPromo.val:0;
-  const walletSave  = useWallet?Math.min(wallet,cartTotal-promoSave):0;
-  const finalTotal  = Math.max(0,cartTotal-promoSave-walletSave)+29;
+  // ── Change 3: Recurring multiplier — charge all visits upfront ────────
+  const recurMonths    = recurDuration==='6months'?6:recurDuration==='3months'?3:1;
+  const visitsPerMonth = recurFreq==='Monthly'?1:recurFreq==='Biweekly'?2:4;
+  const recurVisits    = bookMode==='recurring' ? recurMonths * visitsPerMonth : 1;
+  const recurBase      = bookMode==='recurring' ? cartTotal * recurVisits : cartTotal;
+  const promoSave   = appliedPromo?appliedPromo.type==='pct'?Math.round(recurBase*appliedPromo.val/100):appliedPromo.val:0;
+  const walletSave  = useWallet?Math.min(wallet,recurBase-promoSave):0;
+  const finalTotal  = Math.max(0,recurBase-promoSave-walletSave)+29;
 
   const toggleAddon = (id)=>setSelAddons(p=>p.includes(id)?p.filter(x=>x!==id):[...p,id]);
 
@@ -736,22 +909,36 @@ export default function App() {
   };
 
   const sendOTP = async()=>{
-    if(!phone||phone.length<10){Alert.alert('Invalid','Please enter a valid 10-digit mobile number');return;}
+    setPhoneError('');
+    const digits = phone.replace(/\D/g,'');
+    if(!digits || digits.length < 10){
+      setPhoneError('Please enter a valid 10-digit mobile number');
+      return;
+    }
+    if(digits.length > 10){
+      setPhoneError('Enter only 10 digits without country code');
+      return;
+    }
     setLoading(true);
     try{
-      const confirmation = await auth().signInWithPhoneNumber(`+91${phone}`);
+      // React Native Firebase phone auth — no browser redirect, no reCAPTCHA
+      const confirmation = await auth().signInWithPhoneNumber(`+91${digits}`);
       setConfirm(confirmation);
       setLoading(false);
       setScreen('otp');
-      if(TEST_PHONES.includes(phone)){
-        Alert.alert('OTP Ready ✅','Test number detected.\nEnter OTP: 123456');
-      } else {
-        Alert.alert('OTP Sent ✅',`SMS sent to +91 ${phone}\nPlease enter the 6-digit code`);
+      // Test numbers get fixed OTP 123456 — no real SMS
+      if(TEST_PHONES.includes(digits)){
+        setOtpError(''); // clear any previous error
+        // Show inline test OTP hint — not an alert
       }
     }catch(err){
       setLoading(false);
-      console.error('sendOTP error:',err);
-      Alert.alert('OTP Failed',err.message||'Could not send OTP. Please check your number and try again.');
+      console.error('sendOTP error:', err);
+      const code = err?.code || '';
+      if(code.includes('invalid-phone-number'))    setPhoneError('Invalid phone number format');
+      else if(code.includes('too-many-requests'))  setPhoneError('Too many attempts. Try after 1 hour');
+      else if(code.includes('network-request-failed')) setPhoneError('Check your internet connection');
+      else setPhoneError(err.message || 'Could not send OTP. Please try again');
     }
   };
 
@@ -766,18 +953,18 @@ export default function App() {
   };
 
   const verifyOTP = async()=>{
-    if(!otpVal||otpVal.length<6){Alert.alert('Invalid','Please enter the 6-digit OTP');return;}
+    setOtpError('');
+    if(!otpVal||otpVal.length<6){setOtpError('Please enter the 6-digit OTP');return;}
     setLoading(true);
     if(DEMO_MODE){
-      if(otpVal!=='123456'){setLoading(false);Alert.alert('Wrong OTP','Demo OTP is 123456');return;}
+      if(otpVal!=='123456'){setLoading(false);setOtpError('Wrong OTP. Enter 123456 for demo');return;}
       const u={name:uname||'Customer',phone:`+91${phone}`,code:'VG'+Math.random().toString(36).substr(2,5).toUpperCase(),walletBalance:200};
       setUser(u);setWallet(200);setLoading(false);setScreen('main');setTab('home');
-      Alert.alert('🪷 Welcome!',`Namaste ${uname||'Customer'}!\n🎁 ₹200 wallet bonus added!`);
       return;
     }
     try{
-      // Verify OTP with Firebase Auth
-      if(!confirm){throw new Error('OTP session expired. Please request OTP again.');}
+      // Verify OTP with Firebase Auth — no browser redirect in React Native
+      if(!confirm){setLoading(false);setOtpError('OTP session expired. Go back and request a new OTP');return;}
       await confirm.confirm(otpVal);
       // Get or create user document in Firestore
       const existingUser = await getUser(phone);
@@ -827,7 +1014,11 @@ export default function App() {
     }catch(err){
       setLoading(false);
       console.error('verifyOTP error:',err);
-      Alert.alert('Verification Failed',err.message||'Wrong OTP. Please try again.');
+      const code = err?.code || '';
+      if(code.includes('invalid-verification-code')) setOtpError('Wrong OTP. Please check and try again');
+      else if(code.includes('code-expired'))          setOtpError('OTP expired. Go back and request a new one');
+      else if(code.includes('session-expired'))       setOtpError('Session expired. Go back and request OTP again');
+      else setOtpError(err.message || 'Verification failed. Please try again');
     }
   };
 
@@ -845,10 +1036,14 @@ export default function App() {
     setPlacing(true);
     const pro=PROFESSIONALS[Math.floor(Math.random()*PROFESSIONALS.length)];
     const fullAddr = [flat, buildingName, streetName, landmark, selArea, 'Vizag'].filter(Boolean).join(', ');
+    // ── Change 4: use calSelDate (full calendar) with fallback to old DATES array
+    const _fmtDate = calSelDate
+      ? calSelDate.toLocaleDateString('en-IN',{weekday:'short',day:'numeric',month:'short'})
+      : DATES[selDate] ? `${DATES[selDate].label} ${DATES[selDate].num} ${DATES[selDate].mon}` : 'TBD';
     let slot;
     if(bookMode==='instant'){slot='Arriving in 30–45 minutes';}
-    else if(bookMode==='recurring'){slot=`Every ${recurFreq||'Week'} · Starts ${DATES[selDate].label} ${DATES[selDate].num} ${DATES[selDate].mon} at ${selTime}`;}
-    else{slot=`${DATES[selDate].label} ${DATES[selDate].num} ${DATES[selDate].mon} at ${selTime}`;}
+    else if(bookMode==='recurring'){slot=`Every ${recurFreq||'Weekly'} · ${recurDuration} · ${recurVisits} visits · Starts ${_fmtDate} at ${selTime}`;}
+    else{slot=`${_fmtDate} at ${selTime}`;}
 
     const resetForm = ()=>{
       setCart([]);setAppliedPromo(null);setUseWallet(false);setPromoCode('');
@@ -909,10 +1104,14 @@ export default function App() {
         platformFee: 29,
         slot,
         bookingMode: bookMode,
-        recurFreq: bookMode==='recurring'?(recurFreq||'Weekly'):null,
-        // ← scheduledDate and scheduledTime needed for recurring occurrences
-        scheduledDate: (bookMode==='scheduled'||bookMode==='recurring') && selDate !== null
-          ? `${new Date().getFullYear()}-${String(new Date().getMonth()+1).padStart(2,'0')}-${String(DATES[selDate]?.num||new Date().getDate()).padStart(2,'0')}`
+        recurFreq:     bookMode==='recurring'?(recurFreq||'Weekly'):null,
+        recurDuration: bookMode==='recurring'?recurDuration:null,
+        recurVisits:   bookMode==='recurring'?recurVisits:null,
+        // ← scheduledDate: prefer calSelDate (calendar), fall back to old DATES picker
+        scheduledDate: (bookMode==='scheduled'||bookMode==='recurring')
+          ? (calSelDate ? calSelDate.toISOString().split('T')[0]
+             : DATES[selDate] ? `${new Date().getFullYear()}-${String(new Date().getMonth()+1).padStart(2,'0')}-${String(DATES[selDate].num).padStart(2,'0')}`
+             : null)
           : null,
         scheduledTime: selTime||null,
         address: {
@@ -933,6 +1132,32 @@ export default function App() {
 
       const result = await createBooking(bookingData);
       if(!result.success)throw new Error(result.error||'Failed to create booking');
+
+      // ── Change 3: Create recurring child docs AFTER payment success ──────────
+      if(bookMode==='recurring' && bookingData.recurFreq && bookingData.scheduledDate){
+        try{
+          const freqDays = {'Weekly':7,'Biweekly':14,'Monthly':30};
+          const days = freqDays[bookingData.recurFreq]||7;
+          const totalV = recurVisits||4;
+          const baseDate = new Date(bookingData.scheduledDate);
+          const batch = firestore().batch();
+          for(let i=1;i<totalV;i++){
+            const nextDate = new Date(baseDate);
+            nextDate.setDate(baseDate.getDate()+(days*i));
+            const nextOrderId='VG'+(Date.now()+i*1000).toString().slice(-6);
+            const nextSlot=`Every ${bookingData.recurFreq} · Visit ${i+1} of ${totalV} · ${nextDate.toLocaleDateString('en-IN',{weekday:'short',day:'numeric',month:'short'})} at ${bookingData.scheduledTime}`;
+            batch.set(firestore().collection('bookings').doc(nextOrderId),{
+              ...bookingData, orderId:nextOrderId,
+              otp:Math.floor(1000+Math.random()*9000).toString(),
+              status:'confirmed', slot:nextSlot,
+              scheduledDate:nextDate.toISOString().split('T')[0],
+              parentOrderId:result.orderId, isRecurringChild:true, recurIndex:i,
+              createdAt:firestore.FieldValue.serverTimestamp(), rated:false,
+            });
+          }
+          await batch.commit();
+        }catch(e){console.error('Recurring child docs error:',e);}
+      }
 
       const o = {
         orderId: result.orderId,
@@ -1029,26 +1254,53 @@ export default function App() {
     </View>
   );
 
-  // ── LOGIN
+  // ── LOGIN (Change 9: inline errors, no browser redirect)
   if(screen==='login') return(
     <SafeAreaView style={{flex:1,backgroundColor:C.bg}}>
       <StatusBar barStyle="dark-content"/>
       <ScrollView contentContainerStyle={{padding:24,paddingTop:16}} keyboardShouldPersistTaps="handled">
-        <TouchableOpacity onPress={()=>setScreen('main')} style={{marginBottom:28,marginTop:8}}><Text style={{fontSize:22,color:C.text}}>←</Text></TouchableOpacity>
+        <TouchableOpacity onPress={()=>{setScreen('main');setPhoneError('');}} style={{marginBottom:28,marginTop:8}}>
+          <Text style={{fontSize:22,color:C.text}}>←</Text>
+        </TouchableOpacity>
         <DText style={{fontSize:28,fontWeight:'700',color:C.orange,marginBottom:4,letterSpacing:-0.5}}>🪷 VEGA</DText>
-        <DText style={{fontSize:24,fontWeight:'700',color:C.text,marginBottom:6}}>Welcome back</DText>
+        <DText style={{fontSize:24,fontWeight:'700',color:C.text,marginBottom:6}}>Welcome</DText>
         <Text style={{fontSize:14,color:C.muted,marginBottom:32,lineHeight:20}}>Sign in to book home services in Vizag</Text>
         <Text style={S.lbl}>Your Name</Text>
         <TextInput style={S.inp} placeholder="Full name" placeholderTextColor={C.muted2} value={uname} onChangeText={setUname}/>
         <Text style={[S.lbl,{marginTop:16}]}>Mobile Number</Text>
-        <View style={S.phoneRow}>
+        <View style={[S.phoneRow, phoneError?{borderColor:C.red,borderWidth:1}:{}]}>
           <Text style={S.flag}>🇮🇳 +91</Text>
-          <TextInput style={S.phoneInp} placeholder="10-digit number" placeholderTextColor={C.muted2} keyboardType="number-pad" maxLength={10} value={phone} onChangeText={setPhone}/>
+          <TextInput
+            style={S.phoneInp}
+            placeholder="10-digit number"
+            placeholderTextColor={C.muted2}
+            keyboardType="number-pad"
+            maxLength={10}
+            value={phone}
+            onChangeText={t=>{setPhone(t);setPhoneError('');}}
+          />
         </View>
-        {DEMO_MODE&&<Text style={{textAlign:'center',color:C.muted,fontSize:12,marginTop:8}}>Demo — any 10 digits · OTP: 123456</Text>}
-        <TouchableOpacity style={[S.btn,(phone.length<10||loading)&&{opacity:0.4}]} disabled={phone.length<10||loading} onPress={sendOTP}>
-          {loading?<ActivityIndicator color="#FFF"/>:<Text style={S.btnT}>Send OTP →</Text>}
-        </TouchableOpacity>
+        {/* Inline error — no Alert popup */}
+        {phoneError ? (
+          <View style={{flexDirection:'row',alignItems:'center',gap:6,marginTop:6,marginBottom:4}}>
+            <Text style={{color:C.red,fontSize:13}}>⚠️ {phoneError}</Text>
+          </View>
+        ) : null}
+        {loading&&(
+          <View style={{flexDirection:'row',alignItems:'center',gap:8,marginTop:10,marginBottom:4,backgroundColor:C.orangeBg,borderRadius:12,padding:12,borderWidth:0.5,borderColor:C.orangeBd}}>
+            <ActivityIndicator size="small" color={C.orange}/>
+            <Text style={{color:C.orange,fontSize:13,fontWeight:'600'}}>Sending OTP...</Text>
+          </View>
+        )}
+        {!loading&&(
+          <TouchableOpacity
+            style={[S.btn,{marginTop:phoneError?8:16},(phone.length<10)&&{opacity:0.4}]}
+            disabled={phone.length<10||loading}
+            onPress={sendOTP}
+          >
+            <Text style={S.btnT}>Send OTP →</Text>
+          </TouchableOpacity>
+        )}
         <View style={{marginTop:28,backgroundColor:C.orangeBg,borderRadius:16,padding:14,borderWidth:0.5,borderColor:C.orangeBd}}>
           <Text style={{color:C.orange,fontSize:12,fontWeight:'500',lineHeight:18}}>🔒 By continuing you agree to VEGA's Terms of Service. Your number is used only for booking verification.</Text>
         </View>
@@ -1056,22 +1308,56 @@ export default function App() {
     </SafeAreaView>
   );
 
-  // ── OTP
+  // ── OTP (Change 9: inline errors, smooth transition from login with no browser redirect)
   if(screen==='otp') return(
     <SafeAreaView style={{flex:1,backgroundColor:C.bg}}>
-      <View style={{padding:24}}>
-        <TouchableOpacity onPress={()=>setScreen('login')} style={{marginBottom:32,marginTop:8}}><Text style={{fontSize:22,color:C.text}}>←</Text></TouchableOpacity>
-        <DText style={{fontSize:24,fontWeight:'700',color:C.text,marginBottom:6}}>Verify OTP</DText>
-        <Text style={{fontSize:14,color:C.muted,marginBottom:4}}>Sent to +91 {phone}</Text>
-        <TouchableOpacity onPress={()=>setScreen('login')}><Text style={{color:C.orange,fontSize:13,fontWeight:'600',marginBottom:28}}>Change number</Text></TouchableOpacity>
-        <TextInput style={[S.inp,{fontSize:32,fontWeight:'800',letterSpacing:14,textAlign:'center',paddingVertical:18,borderRadius:20}]}
-          placeholder="• • • • • •" placeholderTextColor={C.border} keyboardType="number-pad" maxLength={6} value={otpVal} onChangeText={setOtpVal}/>
-        {DEMO_MODE&&<Text style={{textAlign:'center',color:C.orange,fontSize:12,marginTop:8,marginBottom:4}}>Demo OTP: 123456</Text>}
-        <Text style={{textAlign:'center',color:C.muted,fontSize:12,marginTop:4,marginBottom:24}}>Didn't receive? Wait 60 seconds then resend.</Text>
-        <TouchableOpacity style={[S.btn,(otpVal.length<6||loading)&&{opacity:0.4}]} disabled={otpVal.length<6||loading} onPress={verifyOTP}>
-          {loading?<ActivityIndicator color="#FFF"/>:<Text style={S.btnT}>Verify & Continue ✓</Text>}
+      <ScrollView contentContainerStyle={{padding:24}} keyboardShouldPersistTaps="handled">
+        <TouchableOpacity onPress={()=>{setScreen('login');setOtpError('');setOtpVal('');}} style={{marginBottom:32,marginTop:8}}>
+          <Text style={{fontSize:22,color:C.text}}>←</Text>
         </TouchableOpacity>
-      </View>
+        <DText style={{fontSize:24,fontWeight:'700',color:C.text,marginBottom:6}}>Enter OTP</DText>
+        <Text style={{fontSize:14,color:C.muted,marginBottom:4}}>Sent to +91 {phone}</Text>
+        <TouchableOpacity onPress={()=>{setScreen('login');setOtpVal('');setOtpError('');}}>
+          <Text style={{color:C.orange,fontSize:13,fontWeight:'600',marginBottom:28}}>Change number</Text>
+        </TouchableOpacity>
+        {/* Test number hint — shown inline, not as alert */}
+        {TEST_PHONES.includes(phone)&&(
+          <View style={{backgroundColor:C.greenSolid,borderRadius:12,padding:12,marginBottom:16,borderWidth:0.5,borderColor:C.greenBd,flexDirection:'row',alignItems:'center',gap:8}}>
+            <Text style={{fontSize:16}}>✅</Text>
+            <Text style={{color:C.green,fontSize:13,fontWeight:'600'}}>Test number: use OTP 123456</Text>
+          </View>
+        )}
+        <TextInput
+          style={[S.inp,{fontSize:32,fontWeight:'800',letterSpacing:14,textAlign:'center',paddingVertical:18,borderRadius:20,borderColor:otpError?C.red:C.border2,borderWidth:otpError?1.5:0.5}]}
+          placeholder="• • • • • •"
+          placeholderTextColor={C.border}
+          keyboardType="number-pad"
+          maxLength={6}
+          value={otpVal}
+          onChangeText={t=>{setOtpVal(t);setOtpError('');}}
+        />
+        {/* Inline OTP error */}
+        {otpError ? (
+          <View style={{flexDirection:'row',alignItems:'center',gap:6,marginTop:8,backgroundColor:C.redSolid,borderRadius:10,padding:10,borderWidth:0.5,borderColor:C.redBd}}>
+            <Text style={{color:C.red,fontSize:13}}>⚠️ {otpError}</Text>
+          </View>
+        ) : null}
+        <Text style={{textAlign:'center',color:C.muted,fontSize:12,marginTop:12,marginBottom:24}}>Didn't receive? Wait 60 seconds then tap back to resend.</Text>
+        {loading?(
+          <View style={{flexDirection:'row',alignItems:'center',justifyContent:'center',gap:8,backgroundColor:C.orangeBg,borderRadius:16,padding:16,borderWidth:0.5,borderColor:C.orangeBd}}>
+            <ActivityIndicator size="small" color={C.orange}/>
+            <Text style={{color:C.orange,fontSize:14,fontWeight:'600'}}>Verifying...</Text>
+          </View>
+        ):(
+          <TouchableOpacity
+            style={[S.btn,(otpVal.length<6)&&{opacity:0.4}]}
+            disabled={otpVal.length<6||loading}
+            onPress={verifyOTP}
+          >
+            <Text style={S.btnT}>Verify & Continue ✓</Text>
+          </TouchableOpacity>
+        )}
+      </ScrollView>
     </SafeAreaView>
   );
 
@@ -1146,74 +1432,225 @@ export default function App() {
             </View>
           </View>
 
-          {/* Duration cards */}
-          <Text style={[S.sectionTitle,{marginHorizontal:16,marginBottom:12}]}>Select Duration</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{paddingHorizontal:16,paddingBottom:4}} style={{marginBottom:20}}>
-            {svc.durations.map((dur)=>{
-              const sel=selDur?.id===dur.id;
-              const disc=Math.round((1-dur.price/dur.mrp)*100);
-              return(
-                <TouchableOpacity key={dur.id}
-                  style={{width:152,marginRight:12,borderRadius:22,backgroundColor:sel?svc.gradient[0]:C.card,borderWidth:sel?0:0.5,borderColor:C.border2,padding:16,overflow:'hidden',
-                    ...(sel?{...SHADOW.glow,shadowColor:svc.gradient[1]}:SHADOW.card)}}
-                  onPress={()=>setSelDur(dur)}>
-                  {sel&&<View style={{position:'absolute',top:-24,right:-24,width:80,height:80,borderRadius:40,backgroundColor:'rgba(255,255,255,0.12)'}}/>}
-                  {dur.popular&&(
-                    <View style={{position:'absolute',top:0,right:0,backgroundColor:sel?'rgba(255,255,255,0.25)':C.gold2,paddingHorizontal:8,paddingVertical:4,borderBottomLeftRadius:12,borderTopRightRadius:22}}>
-                      <Text style={{color:'#FFF',fontSize:9,fontWeight:'800',letterSpacing:0.3}}>★ POPULAR</Text>
+          {/* ════ CHANGE 1: HOME CLEANING — 7 task-based packages (multi-select) ════ */}
+          {svc.id==='home' ? (
+            <>
+              <Text style={[S.sectionTitle,{marginHorizontal:16,marginBottom:4}]}>Select Packages</Text>
+              <Text style={{marginHorizontal:16,marginBottom:14,fontSize:13,color:C.muted}}>Tap to add — select as many as you need</Text>
+              {HOME_PACKAGES.map(pkg=>{
+                const sel = !!selPkgs[pkg.id];
+                return(
+                  <TouchableOpacity key={pkg.id}
+                    style={{marginHorizontal:16,marginBottom:10,borderRadius:20,backgroundColor:sel?C.card:C.card,borderWidth:sel?2:0.5,borderColor:sel?C.orange:C.border2,overflow:'hidden',...(sel?SHADOW.glow:SHADOW.card)}}
+                    onPress={()=>{
+                      setSelPkgs(p=>sel?{...p,[pkg.id]:undefined}:{...p,[pkg.id]:true});
+                    }}>
+                    {/* MOST BOOKED badge */}
+                    {pkg.badge&&(
+                      <View style={{position:'absolute',top:0,right:0,backgroundColor:C.orange,paddingHorizontal:12,paddingVertical:4,borderBottomLeftRadius:14}}>
+                        <Text style={{color:'#FFF',fontSize:9,fontWeight:'800',letterSpacing:0.5}}>🔥 {pkg.badge}</Text>
+                      </View>
+                    )}
+                    <View style={{padding:16,flexDirection:'row',alignItems:'flex-start',gap:12}}>
+                      {/* 3D Icon */}
+                      <View style={{width:58,height:58,borderRadius:16,backgroundColor:`${pkg.color}15`,alignItems:'center',justifyContent:'center',borderWidth:0.5,borderColor:`${pkg.color}30`}}>
+                        <SvcIcon id={pkg.emoji} emoji={pkg.emoji} size={36}/>
+                      </View>
+                      <View style={{flex:1}}>
+                        <Text style={{fontSize:14,fontWeight:'700',color:C.text,marginBottom:3,lineHeight:19}} numberOfLines={2}>{pkg.name}</Text>
+                        <Text style={{fontSize:12,color:C.muted,lineHeight:17,marginBottom:8}} numberOfLines={2}>{pkg.desc}</Text>
+                        {/* Price row */}
+                        <View style={{flexDirection:'row',alignItems:'center',gap:8}}>
+                          <DText style={{fontSize:20,fontWeight:'800',color:C.orange}}>₹{pkg.price}</DText>
+                          <Text style={{fontSize:13,color:C.muted2,textDecorationLine:'line-through'}}>₹{pkg.mrp}</Text>
+                          <View style={{backgroundColor:C.greenBg,paddingHorizontal:7,paddingVertical:2,borderRadius:10,borderWidth:0.5,borderColor:C.greenBd}}>
+                            <Text style={{color:C.green,fontSize:10,fontWeight:'700'}}>{Math.round((1-pkg.price/pkg.mrp)*100)}% off</Text>
+                          </View>
+                        </View>
+                      </View>
+                      {/* Checkbox */}
+                      <View style={{width:28,height:28,borderRadius:9,backgroundColor:sel?C.orange:C.light,alignItems:'center',justifyContent:'center',borderWidth:0.5,borderColor:sel?C.orange:C.border,marginTop:4}}>
+                        {sel&&<Text style={{color:'#FFF',fontSize:14,fontWeight:'800'}}>✓</Text>}
+                      </View>
                     </View>
-                  )}
-                  <DText style={{fontSize:26,fontWeight:'700',color:sel?'#FFF':svc.gradient[0],marginBottom:4}}>₹{dur.price}</DText>
-                  <Text style={{fontSize:14,fontWeight:'700',color:sel?'rgba(255,255,255,0.95)':C.text,marginBottom:8}}>{dur.label}</Text>
-                  {dur.tasks?.slice(0,3).map((t,i)=>(
-                    <View key={i} style={{flexDirection:'row',alignItems:'center',gap:5,marginBottom:4}}>
-                      <Text style={{color:sel?'rgba(255,255,255,0.7)':C.green,fontSize:10,fontWeight:'700'}}>✓</Text>
-                      <Text style={{fontSize:10,color:sel?'rgba(255,255,255,0.85)':C.muted,flex:1}} numberOfLines={1}>{t}</Text>
+                    {/* Includes list when selected */}
+                    {sel&&(
+                      <View style={{backgroundColor:C.greenSolid,marginHorizontal:16,marginBottom:14,borderRadius:14,padding:12,borderWidth:0.5,borderColor:C.greenBd}}>
+                        {pkg.includes.map((inc,i)=>(
+                          <View key={i} style={{flexDirection:'row',alignItems:'flex-start',gap:6,marginBottom:i<pkg.includes.length-1?5:0}}>
+                            <Text style={{color:C.green,fontWeight:'700',fontSize:12,marginTop:1}}>✅</Text>
+                            <Text style={{fontSize:12,color:C.text,flex:1}}>{inc}</Text>
+                          </View>
+                        ))}
+                      </View>
+                    )}
+                  </TouchableOpacity>
+                );
+              })}
+              <View style={{height:120}}/>
+            </>
+          ) : svc.id==='car' ? (
+            /* ════ CHANGE 6: CAR CLEANING — car type selector + duration cards ════ */
+            <>
+              <Text style={[S.sectionTitle,{marginHorizontal:16,marginBottom:8}]}>Your Car Type</Text>
+              <View style={{flexDirection:'row',marginHorizontal:16,gap:8,marginBottom:20}}>
+                {[['hatchback','🚗','Hatchback',svc.carExamples.hatchback],['sedan','🚙','Sedan',svc.carExamples.sedan],['suv','🛻','SUV / MUV',svc.carExamples.suv]].map(([ct,ico,label,ex])=>(
+                  <TouchableOpacity key={ct}
+                    style={{flex:1,borderRadius:16,padding:12,borderWidth:carType===ct?2:0.5,borderColor:carType===ct?C.teal:C.border2,backgroundColor:C.card,alignItems:'center',...(carType===ct?SHADOW.glow:SHADOW.card),shadowColor:C.teal}}
+                    onPress={()=>{
+                      setCarType(ct);
+                      const updDur = svc.durations.find(d=>d.id===(selDur?.id||'c1'));
+                      if(updDur) setSelDur({...updDur, price: svc.carPricing[ct==='hatchback'?'single':ct==='sedan'?'single':'single'][ct] || updDur.price});
+                    }}>
+                    <Text style={{fontSize:24,marginBottom:4}}>{ico}</Text>
+                    <Text style={{fontSize:11,fontWeight:'700',color:carType===ct?C.teal:C.text,textAlign:'center'}}>{label}</Text>
+                    <Text style={{fontSize:9,color:C.muted,textAlign:'center',marginTop:2,lineHeight:12}} numberOfLines={2}>{ex}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              <Text style={[S.sectionTitle,{marginHorizontal:16,marginBottom:12}]}>Select Package</Text>
+              {svc.durations.map(dur=>{
+                const priceKey = dur.id==='c1'?'single':dur.id==='c2'?'weekly':'monthly';
+                const dynPrice = svc.carPricing[priceKey]?.[carType] || dur.price;
+                const sel=selDur?.id===dur.id;
+                return(
+                  <TouchableOpacity key={dur.id}
+                    style={{marginHorizontal:16,marginBottom:10,borderRadius:20,backgroundColor:C.card,borderWidth:sel?2:0.5,borderColor:sel?C.teal:C.border2,padding:16,...(sel?SHADOW.glow:SHADOW.card),shadowColor:C.teal}}
+                    onPress={()=>setSelDur({...dur,price:dynPrice})}>
+                    {dur.popular&&<View style={{position:'absolute',top:0,right:0,backgroundColor:C.teal,paddingHorizontal:12,paddingVertical:4,borderBottomLeftRadius:14,borderTopRightRadius:20}}><Text style={{color:'#FFF',fontSize:9,fontWeight:'800'}}>★ POPULAR</Text></View>}
+                    <View style={{flexDirection:'row',alignItems:'flex-start',gap:10}}>
+                      <View style={{flex:1}}>
+                        <Text style={{fontSize:14,fontWeight:'700',color:C.text,marginBottom:3}}>{dur.label}</Text>
+                        <Text style={{fontSize:11,color:C.muted,marginBottom:8}}>{dur.duration}</Text>
+                        {dur.tasks?.map((t,i)=>(
+                          <View key={i} style={{flexDirection:'row',gap:6,marginBottom:4}}>
+                            <Text style={{color:C.green,fontSize:11,fontWeight:'700'}}>✅</Text>
+                            <Text style={{fontSize:12,color:C.text,flex:1}}>{t}</Text>
+                          </View>
+                        ))}
+                      </View>
+                      <View style={{alignItems:'flex-end',gap:4}}>
+                        <DText style={{fontSize:20,fontWeight:'800',color:C.teal}}>₹{dynPrice}</DText>
+                        <Text style={{fontSize:11,color:C.muted2,textDecorationLine:'line-through'}}>₹{Math.round(dynPrice*1.9)}</Text>
+                        {sel&&<View style={{width:28,height:28,borderRadius:9,backgroundColor:C.teal,alignItems:'center',justifyContent:'center'}}>
+                          <Text style={{color:'#FFF',fontSize:13,fontWeight:'800'}}>✓</Text>
+                        </View>}
+                      </View>
                     </View>
-                  ))}
-                  {/* ✅ Soft badge inside card */}
-                  <View style={{marginTop:10,backgroundColor:sel?'rgba(255,255,255,0.20)':C.greenBg,paddingHorizontal:8,paddingVertical:3,borderRadius:20,alignSelf:'flex-start',borderWidth:0.5,borderColor:sel?'rgba(255,255,255,0.25)':C.greenBd}}>
-                    <Text style={{color:sel?'#FFF':C.green,fontSize:10,fontWeight:'600'}}>{disc}% off</Text>
-                  </View>
-                </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
+                    {sel&&dur.notCovered&&(
+                      <View style={{marginTop:10,backgroundColor:C.redSolid,borderRadius:12,padding:10,borderWidth:0.5,borderColor:C.redBd}}>
+                        <Text style={{fontWeight:'700',color:C.red,fontSize:11,marginBottom:6}}>❌ Not Included</Text>
+                        {dur.notCovered?.map((nc,i)=><View key={i} style={{flexDirection:'row',gap:6,marginBottom:3}}><Text style={{color:C.red,fontSize:10}}>✗</Text><Text style={{fontSize:11,color:C.text2,flex:1}}>{nc}</Text></View>)}
+                      </View>
+                    )}
+                  </TouchableOpacity>
+                );
+              })}
+              <View style={{height:100}}/>
+            </>
+          ) : (
+            /* ════ OTHER SERVICES (Bathroom, Kitchen, Deep, etc.) ════ */
+            <>
+              {/* Duration cards */}
+              <Text style={[S.sectionTitle,{marginHorizontal:16,marginBottom:12}]}>Select Option</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{paddingHorizontal:16,paddingBottom:4}} style={{marginBottom:20}}>
+                {svc.durations.map((dur)=>{
+                  const sel=selDur?.id===dur.id;
+                  const disc=Math.round((1-dur.price/dur.mrp)*100);
+                  return(
+                    <TouchableOpacity key={dur.id}
+                      style={{width:152,marginRight:12,borderRadius:22,backgroundColor:sel?svc.gradient[0]:C.card,borderWidth:sel?0:0.5,borderColor:C.border2,padding:16,overflow:'hidden',
+                        ...(sel?{...SHADOW.glow,shadowColor:svc.gradient[1]}:SHADOW.card)}}
+                      onPress={()=>setSelDur(dur)}>
+                      {sel&&<View style={{position:'absolute',top:-24,right:-24,width:80,height:80,borderRadius:40,backgroundColor:'rgba(255,255,255,0.12)'}}/>}
+                      {dur.popular&&(
+                        <View style={{position:'absolute',top:0,right:0,backgroundColor:sel?'rgba(255,255,255,0.25)':C.gold2,paddingHorizontal:8,paddingVertical:4,borderBottomLeftRadius:12,borderTopRightRadius:22}}>
+                          <Text style={{color:'#FFF',fontSize:9,fontWeight:'800',letterSpacing:0.3}}>★ POPULAR</Text>
+                        </View>
+                      )}
+                      <DText style={{fontSize:26,fontWeight:'700',color:sel?'#FFF':svc.gradient[0],marginBottom:4}}>₹{dur.price}</DText>
+                      <Text style={{fontSize:14,fontWeight:'700',color:sel?'rgba(255,255,255,0.95)':C.text,marginBottom:8}}>{dur.label}</Text>
+                      {dur.tasks?.slice(0,3).map((t,i)=>(
+                        <View key={i} style={{flexDirection:'row',alignItems:'center',gap:5,marginBottom:4}}>
+                          <Text style={{color:sel?'rgba(255,255,255,0.7)':C.green,fontSize:10,fontWeight:'700'}}>✓</Text>
+                          <Text style={{fontSize:10,color:sel?'rgba(255,255,255,0.85)':C.muted,flex:1}} numberOfLines={1}>{t}</Text>
+                        </View>
+                      ))}
+                      <View style={{marginTop:10,backgroundColor:sel?'rgba(255,255,255,0.20)':C.greenBg,paddingHorizontal:8,paddingVertical:3,borderRadius:20,alignSelf:'flex-start',borderWidth:0.5,borderColor:sel?'rgba(255,255,255,0.25)':C.greenBd}}>
+                        <Text style={{color:sel?'#FFF':C.green,fontSize:10,fontWeight:'600'}}>{disc}% off</Text>
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
 
-          {/* Included tasks */}
-          {selDur?.tasks&&(
-            <Card style={{marginHorizontal:16,backgroundColor:C.greenSolid,borderColor:C.greenBd,marginBottom:16}}>
-              <Text style={{fontSize:11,fontWeight:'700',color:C.green,marginBottom:10,letterSpacing:0.8}}>INCLUDED IN {selDur.label.toUpperCase()}</Text>
-              {selDur.tasks.map((t,i)=><View key={i} style={{flexDirection:'row',alignItems:'flex-start',gap:8,marginBottom:6}}><Text style={{color:C.green,fontWeight:'700',fontSize:13}}>✓</Text><Text style={{fontSize:13,color:C.text,flex:1}}>{t}</Text></View>)}
-              {selDur.optional&&<View style={{marginTop:8,backgroundColor:'rgba(255,255,255,0.6)',borderRadius:10,padding:10}}><Text style={{fontSize:12,color:C.gold,fontWeight:'600'}}>📝 Optional: {selDur.optional}</Text></View>}
-              {selDur.note&&<Text style={{fontSize:11,color:C.green,marginTop:6,fontStyle:'italic'}}>💡 {selDur.note}</Text>}
-            </Card>
+              {/* CHANGE 2: Bathroom — show full included + not-included per option */}
+              {selDur?.tasks&&(
+                <Card style={{marginHorizontal:16,backgroundColor:C.greenSolid,borderColor:C.greenBd,marginBottom:10}}>
+                  <Text style={{fontSize:11,fontWeight:'700',color:C.green,marginBottom:10,letterSpacing:0.8}}>✅ INCLUDED — {selDur.label.toUpperCase()}</Text>
+                  {selDur.tasks.map((t,i)=><View key={i} style={{flexDirection:'row',alignItems:'flex-start',gap:8,marginBottom:6}}><Text style={{color:C.green,fontWeight:'700',fontSize:13}}>✅</Text><Text style={{fontSize:13,color:C.text,flex:1}}>{t}</Text></View>)}
+                  {selDur.note&&<Text style={{fontSize:11,color:C.green,marginTop:6,fontStyle:'italic'}}>💡 {selDur.note}</Text>}
+                </Card>
+              )}
+              {selDur?.notIncluded&&(
+                <Card style={{marginHorizontal:16,backgroundColor:C.redSolid,borderColor:C.redBd,marginBottom:16}}>
+                  <Text style={{fontSize:11,fontWeight:'700',color:C.red,marginBottom:10,letterSpacing:0.8}}>❌ NOT INCLUDED</Text>
+                  {selDur.notIncluded.map((t,i)=><View key={i} style={{flexDirection:'row',alignItems:'flex-start',gap:8,marginBottom:6}}><Text style={{color:C.red,fontWeight:'700',fontSize:13}}>❌</Text><Text style={{fontSize:13,color:C.text2,flex:1}}>{t}</Text></View>)}
+                </Card>
+              )}
+              <TouchableOpacity style={{marginHorizontal:16,marginBottom:8,padding:14,borderRadius:16,borderWidth:0.5,borderColor:C.orangeBd,backgroundColor:C.orangeBg,flexDirection:'row',alignItems:'center',gap:8}} onPress={()=>setShowTerms(true)}>
+                <Text style={{fontSize:16}}>📋</Text>
+                <Text style={{color:C.orange,fontSize:13,fontWeight:'600',flex:1}}>View full terms & coverage</Text>
+                <Text style={{color:C.orange,fontSize:18}}>›</Text>
+              </TouchableOpacity>
+              <View style={{height:100}}/>
+            </>
           )}
-
-          {/* ✅ REMOVED: Worker stepper + checkbox extra tasks */}
-          {/* Iron, Dry, Load Washer are now proper add-ons in Step 2 */}
-
-          {/* ✅ Booking Type moved to final step (step 3) where calendar lives */}
-
-          <TouchableOpacity style={{marginHorizontal:16,marginBottom:8,padding:14,borderRadius:16,borderWidth:0.5,borderColor:C.orangeBd,backgroundColor:C.orangeBg,flexDirection:'row',alignItems:'center',gap:8}} onPress={()=>setShowTerms(true)}>
-            <Text style={{fontSize:16}}>📋</Text>
-            <Text style={{color:C.orange,fontSize:13,fontWeight:'600',flex:1}}>View what's covered & not covered</Text>
-            <Text style={{color:C.orange,fontSize:18}}>›</Text>
-          </TouchableOpacity>
-          <View style={{height:100}}/>
         </ScrollView>
 
-        <View style={{backgroundColor:C.white,padding:16,paddingBottom:24,borderTopWidth:0.5,borderTopColor:C.border2,...SHADOW.soft}}>
-          <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center'}}>
-            <View>
-              <Text style={{fontSize:11,color:C.muted}}>1 {svc.workerLabel} · {selDur?.label}</Text>
-              <DText style={{fontSize:28,fontWeight:'700',color:C.orange}}>₹{unitPrice}</DText>
+        {/* Bottom CTA — home packages vs others */}
+        {svc.id==='home' ? (() => {
+          const pkgList = HOME_PACKAGES.filter(p=>selPkgs[p.id]);
+          const pkgTotal = pkgList.reduce((s,p)=>s+p.price,0);
+          return(
+            <View style={{backgroundColor:C.white,padding:16,paddingBottom:24,borderTopWidth:0.5,borderTopColor:C.border2,...SHADOW.soft}}>
+              {pkgList.length>0&&(
+                <Text style={{fontSize:12,color:C.muted,marginBottom:4}}>{pkgList.length} package{pkgList.length>1?'s':''} selected</Text>
+              )}
+              <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center'}}>
+                <View>
+                  <DText style={{fontSize:28,fontWeight:'700',color:pkgList.length?C.orange:C.muted}}>{pkgList.length?`₹${pkgTotal}`:'Select a package'}</DText>
+                </View>
+                <TouchableOpacity
+                  style={[S.ctaBtn,{backgroundColor:pkgList.length?svc.gradient[0]:C.muted,...(pkgList.length?SHADOW.glow:{})},!pkgList.length&&{opacity:0.5}]}
+                  disabled={!pkgList.length}
+                  onPress={()=>{
+                    // Build cart from selected packages
+                    const items = pkgList.map(p=>({
+                      svcId:'home', id:p.id+'_'+Date.now(), icon:'🏠', name:p.name,
+                      extras:[], price:p.price, mrp:p.mrp, color:C.orange, workers:1, durLabel:p.name,
+                    }));
+                    setCart(items);
+                    setScreen('step3');
+                  }}>
+                  <Text style={S.ctaBtnT}>Schedule →</Text>
+                </TouchableOpacity>
+              </View>
             </View>
-            <TouchableOpacity style={[S.ctaBtn,{backgroundColor:svc.gradient[0],...SHADOW.glow,shadowColor:svc.gradient[1]}]} onPress={()=>setScreen('step2')}>
-              <Text style={S.ctaBtnT}>Add-ons →</Text>
-            </TouchableOpacity>
+          );
+        })() : (
+          <View style={{backgroundColor:C.white,padding:16,paddingBottom:24,borderTopWidth:0.5,borderTopColor:C.border2,...SHADOW.soft}}>
+            <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center'}}>
+              <View>
+                <Text style={{fontSize:11,color:C.muted}}>1 {svc.workerLabel} · {selDur?.label}</Text>
+                <DText style={{fontSize:28,fontWeight:'700',color:C.orange}}>₹{unitPrice}</DText>
+              </View>
+              <TouchableOpacity style={[S.ctaBtn,{backgroundColor:svc.gradient[0],...SHADOW.glow,shadowColor:svc.gradient[1]}]} onPress={()=>setScreen('step2')}>
+                <Text style={S.ctaBtnT}>Add-ons →</Text>
+              </TouchableOpacity>
+            </View>
           </View>
-        </View>
+        )}
       </SafeAreaView>
     );
   }
@@ -1284,7 +1721,7 @@ export default function App() {
     return(
       <SafeAreaView style={{flex:1,backgroundColor:C.bg}}>
         <View style={S.topBar}>
-          <TouchableOpacity onPress={()=>setScreen('step2')} style={S.backCircle}><Text style={S.backArrow}>←</Text></TouchableOpacity>
+          <TouchableOpacity onPress={()=>setScreen(selSvc.id==='home'?'step1':'step2')} style={S.backCircle}><Text style={S.backArrow}>←</Text></TouchableOpacity>
           <DText style={S.topTitle}>Schedule</DText>
           <View style={{width:36}}/>
         </View>
@@ -1308,15 +1745,33 @@ export default function App() {
           )}
           {bookMode==='recurring'&&(
             <Card style={{backgroundColor:C.goldSolid,borderColor:C.goldBd,marginBottom:20}}>
-              <DText style={{fontWeight:'700',color:C.gold,fontSize:16,marginBottom:6}}>🔄 Recurring Plan — Save 25%</DText>
-              <Text style={{color:C.muted,fontSize:13,lineHeight:20,marginBottom:12}}>Scheduled automatically. Cancel anytime.</Text>
-              <View style={{flexDirection:'row',gap:8,flexWrap:'wrap'}}>
-                {['Weekly','Biweekly','Monthly'].map((opt,i)=>(
-                  <TouchableOpacity key={i} onPress={()=>setRecurFreq(opt)}
-                    style={{paddingHorizontal:14,paddingVertical:8,borderRadius:20,backgroundColor:recurFreq===opt?C.gold:C.white,borderWidth:0.5,borderColor:C.goldBd}}>
+              <DText style={{fontWeight:'700',color:C.gold,fontSize:16,marginBottom:4}}>🔄 Recurring Plan — Save 25%</DText>
+              <Text style={{color:C.muted,fontSize:12,lineHeight:18,marginBottom:12}}>Scheduled automatically. Charged upfront. Cancel anytime.</Text>
+              {/* Frequency */}
+              <Text style={{fontSize:12,fontWeight:'700',color:C.gold,marginBottom:6}}>How often?</Text>
+              <View style={{flexDirection:'row',gap:8,marginBottom:14}}>
+                {['Weekly','Biweekly','Monthly'].map((opt)=>(
+                  <TouchableOpacity key={opt} onPress={()=>setRecurFreq(opt)}
+                    style={{flex:1,paddingVertical:9,borderRadius:20,alignItems:'center',backgroundColor:recurFreq===opt?C.gold:C.white,borderWidth:0.5,borderColor:C.goldBd}}>
                     <Text style={{color:recurFreq===opt?'#FFF':C.gold,fontSize:12,fontWeight:'700'}}>{opt}</Text>
                   </TouchableOpacity>
                 ))}
+              </View>
+              {/* Duration — Change 3 */}
+              <Text style={{fontSize:12,fontWeight:'700',color:C.gold,marginBottom:6}}>Plan duration?</Text>
+              <View style={{flexDirection:'row',gap:8,marginBottom:10}}>
+                {[['1month','1 Month'],['3months','3 Months'],['6months','6 Months']].map(([val,label])=>(
+                  <TouchableOpacity key={val} onPress={()=>setRecurDuration(val)}
+                    style={{flex:1,paddingVertical:9,borderRadius:20,alignItems:'center',backgroundColor:recurDuration===val?C.gold:C.white,borderWidth:0.5,borderColor:C.goldBd}}>
+                    <Text style={{color:recurDuration===val?'#FFF':C.gold,fontSize:11,fontWeight:'700'}}>{label}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              <View style={{backgroundColor:'rgba(154,107,16,0.12)',borderRadius:12,padding:10,flexDirection:'row',alignItems:'center',gap:8}}>
+                <Text style={{fontSize:14}}>🗓️</Text>
+                <Text style={{color:C.gold,fontWeight:'700',fontSize:12,flex:1}}>
+                  {recurVisits} total visits · ₹{cartTotal>0?cartTotal*recurVisits:totalPrice*recurVisits} charged upfront
+                </Text>
               </View>
             </Card>
           )}
@@ -1326,16 +1781,73 @@ export default function App() {
                 <Text style={{fontSize:18}}>👇</Text>
                 <Text style={{flex:1,fontSize:12,color:C.orange,fontWeight:'600'}}>Pick a date and time below to continue</Text>
               </View>
-              <Text style={{fontSize:14,fontWeight:'700',color:C.text,marginBottom:12}}>Select Date</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{marginBottom:20}}>
-                {DATES.map((d,i)=>(
-                  <TouchableOpacity key={i} style={{marginRight:10,width:66,paddingVertical:14,borderRadius:18,alignItems:'center',backgroundColor:selDate===i?C.orange:C.card,borderWidth:0.5,borderColor:selDate===i?C.orange:C.border2,...(selDate===i?SHADOW.glow:{...SHADOW.card})}} onPress={()=>setSelDate(i)}>
-                    <Text style={{fontSize:10,color:selDate===i?'rgba(255,255,255,0.8)':C.muted,fontWeight:'600'}}>{d.label}</Text>
-                    <DText style={{fontSize:22,fontWeight:'700',color:selDate===i?'#FFF':C.text,marginTop:4}}>{d.num}</DText>
-                    <Text style={{fontSize:10,color:selDate===i?'rgba(255,255,255,0.7)':C.muted}}>{d.mon}</Text>
+              {/* ── Change 4: Full Month Calendar ─────────────────────────── */}
+              <Text style={{fontSize:14,fontWeight:'700',color:C.text,marginBottom:10}}>Select Date</Text>
+              <Card style={{marginBottom:16,padding:14}}>
+                {/* Month navigation */}
+                <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',marginBottom:12}}>
+                  <TouchableOpacity onPress={()=>setCalMonth(m=>{const n=new Date(m);n.setMonth(m.getMonth()-1);return n;})}
+                    style={{width:34,height:34,borderRadius:17,backgroundColor:C.light,alignItems:'center',justifyContent:'center',borderWidth:0.5,borderColor:C.border}}>
+                    <Text style={{fontSize:16,color:C.text}}>‹</Text>
                   </TouchableOpacity>
-                ))}
-              </ScrollView>
+                  <Text style={{fontWeight:'700',color:C.text,fontSize:14}}>
+                    {calMonth.toLocaleDateString('en-IN',{month:'long',year:'numeric'})}
+                  </Text>
+                  <TouchableOpacity onPress={()=>setCalMonth(m=>{const n=new Date(m);n.setMonth(m.getMonth()+1);return n;})}
+                    style={{width:34,height:34,borderRadius:17,backgroundColor:C.light,alignItems:'center',justifyContent:'center',borderWidth:0.5,borderColor:C.border}}>
+                    <Text style={{fontSize:16,color:C.text}}>›</Text>
+                  </TouchableOpacity>
+                </View>
+                {/* Day headers */}
+                <View style={{flexDirection:'row',marginBottom:6}}>
+                  {['Su','Mo','Tu','We','Th','Fr','Sa'].map(d=>(
+                    <View key={d} style={{flex:1,alignItems:'center'}}>
+                      <Text style={{fontSize:11,fontWeight:'700',color:C.muted}}>{d}</Text>
+                    </View>
+                  ))}
+                </View>
+                {/* Calendar grid */}
+                {(()=>{
+                  const todayD=new Date(); todayD.setHours(0,0,0,0);
+                  const mY=calMonth.getFullYear(), mM=calMonth.getMonth();
+                  const firstDow=new Date(mY,mM,1).getDay();
+                  const dim=new Date(mY,mM+1,0).getDate();
+                  const totalCells=Math.ceil((firstDow+dim)/7)*7;
+                  const cells=Array.from({length:totalCells},(_,i)=>{const d=i-firstDow+1;return(d<1||d>dim)?null:d;});
+                  const rows=[];
+                  for(let i=0;i<cells.length;i+=7) rows.push(cells.slice(i,i+7));
+                  return rows.map((row,ri)=>(
+                    <View key={ri} style={{flexDirection:'row',marginBottom:3}}>
+                      {row.map((d,ci)=>{
+                        if(!d) return <View key={ci} style={{flex:1,height:40}}/>;
+                        const dateObj=new Date(mY,mM,d);
+                        const isPast=dateObj<todayD;
+                        const isToday=dateObj.getTime()===todayD.getTime();
+                        const isSel=calSelDate&&calSelDate.getTime()===dateObj.getTime();
+                        return(
+                          <TouchableOpacity key={ci} disabled={isPast}
+                            style={{flex:1,height:40,alignItems:'center',justifyContent:'center',borderRadius:20,
+                              backgroundColor:isSel?C.orange:isToday?C.orangeBg:'transparent',
+                              ...(isSel?SHADOW.glow:{})}}
+                            onPress={()=>setCalSelDate(new Date(mY,mM,d))}>
+                            <Text style={{fontSize:14,fontWeight:isSel||isToday?'700':'400',
+                              color:isSel?'#FFF':isPast?C.muted2:isToday?C.orange:C.text}}>{d}</Text>
+                            {isToday&&!isSel&&<View style={{width:4,height:4,borderRadius:2,backgroundColor:C.orange,marginTop:1}}/>}
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+                  ));
+                })()}
+                {calSelDate&&(
+                  <View style={{marginTop:8,backgroundColor:C.orangeBg,borderRadius:10,padding:8,flexDirection:'row',alignItems:'center',gap:6,borderWidth:0.5,borderColor:C.orangeBd}}>
+                    <Text style={{fontSize:13}}>📅</Text>
+                    <Text style={{color:C.orange,fontWeight:'700',fontSize:12}}>
+                      {calSelDate.toLocaleDateString('en-IN',{weekday:'long',day:'numeric',month:'long',year:'numeric'})}
+                    </Text>
+                  </View>
+                )}
+              </Card>
               <Text style={{fontSize:14,fontWeight:'700',color:C.text,marginBottom:12}}>Select Time</Text>
               <View style={{flexDirection:'row',flexWrap:'wrap',gap:10,marginBottom:20}}>
                 {TIMES.map((t,i)=>(
@@ -1348,22 +1860,37 @@ export default function App() {
           )}
           <Card style={{marginBottom:8}}>
             <Text style={{fontWeight:'700',color:C.text,marginBottom:12}}>Booking Summary</Text>
-            <BR l={`${selSvc.shortName} — ${selDur?.label}`} r={`₹${selDur?.price}`}/>
-            {selAddons.map(id=>{const a=selSvc.addons?.find(x=>x.id===id);return a?<BR key={id} l={a.name} r={`₹${a.price}`}/>:null;})}
+            {selSvc.id==='home'?(
+              cart.map((item,i)=><BR key={i} l={item.name} r={`₹${item.price}`}/>)
+            ):(
+              <>
+                <BR l={`${selSvc.shortName} — ${selDur?.label}`} r={`₹${selDur?.price}`}/>
+                {selAddons.map(id=>{const a=selSvc.addons?.find(x=>x.id===id);return a?<BR key={id} l={a.name} r={`₹${a.price}`}/>:null;})}
+              </>
+            )}
+            {bookMode==='recurring'&&<BR l={`× ${recurVisits} visits (${recurDuration})`} r={`₹${(cartTotal>0?cartTotal:totalPrice)*recurVisits}`} rc={C.gold}/>}
             <View style={{height:1,backgroundColor:C.border,marginVertical:8}}/>
-            <BR l="Total before checkout" r={`₹${totalPrice}`} bold/>
+            <BR l="Total before checkout" r={`₹${bookMode==='recurring'?(cartTotal>0?cartTotal:totalPrice)*recurVisits:(cartTotal>0?cartTotal:totalPrice)}`} bold/>
           </Card>
           <View style={{height:100}}/>
         </ScrollView>
         <View style={{backgroundColor:C.white,padding:16,paddingBottom:24,borderTopWidth:0.5,borderTopColor:C.border2}}>
           <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center'}}>
             <View>
-              <Text style={{fontSize:11,color:C.muted}}>{bookMode==='instant'?'30–45 min arrival':selTime?`${DATES[selDate].label} at ${selTime}`:'Select time'}</Text>
-              <DText style={{fontSize:26,fontWeight:'700',color:C.orange}}>₹{totalPrice}</DText>
+              <Text style={{fontSize:11,color:C.muted}} numberOfLines={1}>
+                {bookMode==='instant'?'30–45 min arrival':selTime?(
+                  calSelDate?`${calSelDate.toLocaleDateString('en-IN',{day:'numeric',month:'short'})} at ${selTime}`:'Select date'
+                ):'Select time'}
+              </Text>
+              {bookMode==='recurring'&&<Text style={{fontSize:9,color:C.gold,fontWeight:'700'}}>{recurVisits} visits upfront</Text>}
+              <DText style={{fontSize:24,fontWeight:'700',color:C.orange}}>
+                ₹{bookMode==='recurring'?(cartTotal>0?cartTotal:totalPrice)*recurVisits:(cartTotal>0?cartTotal:totalPrice)}
+              </DText>
             </View>
             <TouchableOpacity
-              style={[S.ctaBtn,{backgroundColor:selSvc.gradient[0],...SHADOW.glow,shadowColor:selSvc.gradient[1]},((bookMode==='scheduled'||bookMode==='recurring')&&!selTime)&&{opacity:0.4}]}
-              disabled={(bookMode==='scheduled'||bookMode==='recurring')&&!selTime}
+              style={[S.ctaBtn,{backgroundColor:selSvc.gradient[0],...SHADOW.glow,shadowColor:selSvc.gradient[1]},
+                ((bookMode==='scheduled'||bookMode==='recurring')&&(!selTime||!calSelDate))&&{opacity:0.4}]}
+              disabled={(bookMode==='scheduled'||bookMode==='recurring')&&(!selTime||!calSelDate)}
               onPress={()=>{
                 const item=buildCartItem();
                 if(item){setCart(prev=>{const f=prev.filter(i=>i.svcId!==selSvc.id);return [...f,item];});}
@@ -1684,7 +2211,88 @@ export default function App() {
     );
   }
 
-  // ── TRACK
+  // ── TRACK ──────────────────────────────────────────────────────────
+  // Area → approximate GPS coordinates for Visakhapatnam
+  const AREA_COORDS = {
+    'Madhurawada':    [17.7763, 83.3653],
+    'Rushikonda':     [17.7619, 83.3895],
+    'MVP Colony':     [17.7256, 83.3191],
+    'Gajuwaka':       [17.6866, 83.2091],
+    'Seethammadhara': [17.7301, 83.3234],
+    'Dwaraka Nagar':  [17.7201, 83.3012],
+    'BHPV':           [17.6821, 83.2184],
+    'Kommadi':        [17.7932, 83.3742],
+  };
+
+  const buildTrackMapHtml = (workerLat, workerLng, destArea) => {
+    const destCoords = AREA_COORDS[destArea] || [17.7231, 83.3012];
+    const centerLat  = workerLat || destCoords[0];
+    const centerLng  = workerLng || destCoords[1];
+    const hasWorker  = !!(workerLat && workerLng);
+    return `<!DOCTYPE html><html><head>
+      <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1"/>
+      <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+      <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+      <style>
+        *{margin:0;padding:0;box-sizing:border-box;}
+        html,body,#map{width:100%;height:100%;background:#0F0A06;}
+        .worker-pin{background:#E8520A;width:38px;height:38px;border-radius:50%;border:3px solid #fff;
+          display:flex;align-items:center;justify-content:center;font-size:18px;
+          box-shadow:0 0 12px rgba(232,82,10,0.7);}
+        .dest-pin{background:#EF4444;width:32px;height:32px;border-radius:50% 50% 50% 0;
+          transform:rotate(-45deg);border:3px solid #fff;box-shadow:0 0 8px rgba(239,68,68,0.6);}
+        .dest-inner{transform:rotate(45deg);font-size:14px;display:flex;align-items:center;justify-content:center;width:100%;height:100%;}
+        .pulse{position:absolute;width:52px;height:52px;border-radius:50%;border:2px solid #E8520A;
+          animation:pulse 2s ease-out infinite;top:-7px;left:-7px;}
+        @keyframes pulse{0%{transform:scale(1);opacity:0.8;}100%{transform:scale(2);opacity:0;}}
+        .leaflet-control-attribution{display:none;}
+      </style>
+    </head><body>
+    <div id="map"></div>
+    <script>
+      var map = L.map('map',{zoomControl:false,attributionControl:false})
+        .setView([${centerLat},${centerLng}], ${hasWorker ? 14 : 15});
+      window.liveMap = map;
+
+      L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+        {maxZoom:19}).addTo(map);
+
+      // Destination marker (customer address)
+      var destIcon = L.divIcon({
+        className:'',
+        html:'<div class="dest-pin"><div class="dest-inner">📍</div></div>',
+        iconSize:[32,32], iconAnchor:[16,32]
+      });
+      L.marker([${destCoords[0]},${destCoords[1]}],{icon:destIcon})
+        .bindTooltip('Your address',{permanent:false,direction:'top'}).addTo(map);
+
+      ${hasWorker ? `
+      // Worker marker — moves in real-time via injectJavaScript
+      var workerIcon = L.divIcon({
+        className:'',
+        html:'<div style="position:relative"><div class="pulse"></div><div class="worker-pin">🏍️</div></div>',
+        iconSize:[38,38], iconAnchor:[19,19]
+      });
+      window.workerMarker = L.marker([${workerLat},${workerLng}],{icon:workerIcon})
+        .bindTooltip('Professional on the way',{permanent:false,direction:'top'}).addTo(map);
+
+      // Route line between worker and destination
+      window.routeLine = L.polyline(
+        [[${workerLat},${workerLng}],[${destCoords[0]},${destCoords[1]}]],
+        {color:'#E8520A',weight:3,opacity:0.7,dashArray:'8,6'}
+      ).addTo(map);
+
+      // Fit both markers
+      map.fitBounds([[${workerLat},${workerLng}],[${destCoords[0]},${destCoords[1]}]],
+        {padding:[30,30]});
+      ` : `
+      // No GPS yet — show area center with destination only
+      L.circle([${destCoords[0]},${destCoords[1]}],
+        {color:'#E8520A',fillColor:'#E8520A',fillOpacity:0.08,radius:400}).addTo(map);
+      `}
+    </script></body></html>`;
+  };
+
   if(screen==='track'&&trackOrd){
     const pro=trackOrd.professional;
     return(
@@ -1726,31 +2334,41 @@ export default function App() {
               </View>
             </Card>
           )}
+          {/* ── LIVE GPS MAP ─────────────────────────────── */}
           <Card style={{marginBottom:12,overflow:'hidden',padding:0}}>
-            {/* ✅ REAL TRACKING MAP */}
-            <View style={{height:160,overflow:'hidden',position:'relative'}}>
-              <Image
-                source={{ uri: getMapUrl(selArea||'Madhurawada', trackOrd?.addressFull||'') }}
-                style={{width:'100%',height:160}}
-                resizeMode="cover"
+            <View style={{height:200,overflow:'hidden',position:'relative'}}>
+              <WebView
+                ref={trackMapRef}
+                source={{ html: buildTrackMapHtml(
+                  workerLoc?.lat, workerLoc?.lng,
+                  trackOrd?.area || selArea || 'Madhurawada'
+                )}}
+                style={{flex:1,backgroundColor:'#0F0A06'}}
+                scrollEnabled={false}
+                javaScriptEnabled={true}
+                originWhitelist={['*']}
               />
-              <View style={{position:'absolute',top:'25%',left:'28%'}}>
-                <View style={{backgroundColor:C.orange,width:36,height:36,borderRadius:18,alignItems:'center',justifyContent:'center',borderWidth:3,borderColor:'#FFF',...SHADOW.glow}}>
-                  <Text style={{fontSize:16}}>🏍️</Text>
+              {/* Live badge overlay */}
+              <View style={{position:'absolute',top:10,right:10,backgroundColor:'rgba(232,82,10,0.92)',paddingHorizontal:10,paddingVertical:5,borderRadius:20,flexDirection:'row',alignItems:'center',gap:5}}>
+                <View style={{width:7,height:7,borderRadius:4,backgroundColor:'#FFF'}}/>
+                <Text style={{color:'#FFF',fontSize:11,fontWeight:'800'}}>
+                  {workerLoc ? 'LIVE' : 'LOCATING...'}
+                </Text>
+              </View>
+              {!workerLoc&&(
+                <View style={{position:'absolute',bottom:10,left:10,backgroundColor:'rgba(0,0,0,0.75)',paddingHorizontal:10,paddingVertical:5,borderRadius:12}}>
+                  <Text style={{color:'#aaa',fontSize:11}}>Waiting for worker GPS...</Text>
                 </View>
-              </View>
-              <View style={{position:'absolute',top:'52%',left:'55%'}}>
-                <View style={{backgroundColor:C.red,width:32,height:32,borderRadius:16,alignItems:'center',justifyContent:'center',borderWidth:3,borderColor:'#FFF'}}>
-                  <Text style={{fontSize:14}}>📍</Text>
-                </View>
-              </View>
-              <View style={{position:'absolute',bottom:8,right:8,backgroundColor:'rgba(0,0,0,0.7)',paddingHorizontal:8,paddingVertical:4,borderRadius:10}}>
-                <Text style={{color:'#FFF',fontSize:11,fontWeight:'700'}}>~30 min away</Text>
-              </View>
+              )}
             </View>
             <View style={{padding:14,flexDirection:'row',justifyContent:'space-between',alignItems:'center'}}>
-              <View><Text style={{fontWeight:'700',color:C.text}}>📍 {selArea}, Visakhapatnam</Text><Text style={{color:C.muted,fontSize:12,marginTop:2}}>Professional on the way</Text></View>
-              <Badge label="~30 min" color={C.orange}/>
+              <View>
+                <Text style={{fontWeight:'700',color:C.text}}>📍 {trackOrd?.area||selArea||'Visakhapatnam'}</Text>
+                <Text style={{color:C.muted,fontSize:12,marginTop:2}}>
+                  {workerLoc ? '🏍️ Worker location updating live' : 'Professional assigned — locating...'}
+                </Text>
+              </View>
+              <Badge label={workerLoc ? 'Live ●' : 'Assigned'} color={workerLoc ? C.green : C.orange}/>
             </View>
           </Card>
           <Card style={{marginBottom:12}}>
@@ -1789,6 +2407,29 @@ export default function App() {
           </Card>
           {!trackOrd.rated&&<TouchableOpacity style={[S.btn,{marginTop:8,paddingVertical:16,borderRadius:30,...SHADOW.glow}]} onPress={()=>{setRatingOrd(trackOrd);setUserRating(0);setRatingNote('');setScreen('rate');}}><Text style={S.btnT}>⭐ Rate this Service</Text></TouchableOpacity>}
           {trackOrd.rated&&<Card style={{marginTop:8,backgroundColor:C.greenSolid,borderColor:C.greenBd,alignItems:'center'}}><Text style={{color:C.green,fontWeight:'700',fontSize:14}}>✅ Rated {trackOrd.rating}★ — Thank you!</Text></Card>}
+
+          {/* ── BOOK AGAIN button (completed orders) ── */}
+          {trackOrd.status==='completed'&&(
+            <TouchableOpacity
+              style={{marginTop:10,borderWidth:1.5,borderColor:C.orange,borderRadius:30,paddingVertical:14,alignItems:'center',flexDirection:'row',justifyContent:'center',gap:8,backgroundColor:C.orangeSolid}}
+              onPress={()=>{
+                Alert.alert(
+                  '🔄 Book Again?',
+                  `Re-book "${trackOrd.items?.[0]?.name||'same service'}" to the same address?`,
+                  [
+                    {text:'Cancel',style:'cancel'},
+                    {text:'Book Again',onPress:()=>{
+                      setScreen('main');
+                      setTab('services');
+                      Alert.alert('✅ Ready!','Select your service and we\'ll pre-fill your address. Same great VEGA quality!');
+                    }},
+                  ]
+                );
+              }}>
+              <Text style={{fontSize:18}}>🔄</Text>
+              <Text style={{color:C.orange,fontWeight:'800',fontSize:15}}>Book Again</Text>
+            </TouchableOpacity>
+          )}
           <View style={{height:32}}/>
         </ScrollView>
       </SafeAreaView>
@@ -2015,30 +2656,51 @@ export default function App() {
         <Text style={{color:C.orange,fontSize:18}}>›</Text>
       </TouchableOpacity>
 
-      {/* ✅ COMING SOON section */}
+      {/* ── Change 7: COMING SOON — Chimney, Mattress, Sofa Deep + Notify Me ── */}
       <View style={{marginHorizontal:16,marginBottom:22}}>
-        <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center',marginBottom:14}}>
-          <DText style={{fontSize:17,fontWeight:'700',color:C.text}}>🔜 Coming Soon</DText>
-          <Badge label="Launching next month" color={C.teal}/>
+        <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center',marginBottom:6}}>
+          <DText style={{fontSize:17,fontWeight:'700',color:C.text}}>🔜 Launching Soon in Vizag</DText>
+          <Badge label="Notify Me" color={C.teal}/>
         </View>
+        <Text style={{fontSize:12,color:C.muted,marginBottom:14}}>Be first to know — tap Notify Me</Text>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{gap:12,paddingRight:4}}>
           {[
-            {icon:'🍳',name:'Cooking\nService',   color:'#E87030',sub:'Home chef at your door',   tag:'July 2026'},
-            {icon:'🔧',name:'Appliance\nRepair',  color:'#183880',sub:'AC, fridge, washing machine',tag:'July 2026'},
-            {icon:'🌿',name:'Garden\nCare',        color:'#1E6B3A',sub:'Plant care & gardening',    tag:'Aug 2026'},
-            {icon:'🎨',name:'Painting\nService',  color:'#4E2480',sub:'Interior wall painting',     tag:'Aug 2026'},
-          ].map((item,i)=>(
-            <View key={i} style={{width:140,backgroundColor:C.card,borderRadius:20,padding:14,borderWidth:0.5,borderColor:C.border2,...SHADOW.card}}>
-              <View style={{width:52,height:52,borderRadius:16,backgroundColor:`${item.color}18`,alignItems:'center',justifyContent:'center',marginBottom:10,borderWidth:0.5,borderColor:`${item.color}30`}}>
-                <Text style={{fontSize:28}}>{item.icon}</Text>
+            ...COMING_SOON_TASKS.map(t=>({emoji:t.emoji,name:t.name,color:t.color,desc:t.desc,id:t.id})),
+            {emoji:'🍳',name:'Cooking Service',color:'#E87030',desc:'Home chef at your door',id:'cs_cook'},
+            {emoji:'🔧',name:'Appliance Repair',color:'#183880',desc:'AC, fridge, washing machine',id:'cs_repair'},
+            {emoji:'🌿',name:'Garden Care',color:'#1E6B3A',desc:'Plant care & gardening',id:'cs_garden'},
+          ].map((item)=>{
+            const [notified,setNotified]=React.useState(false);
+            return(
+              <View key={item.id} style={{width:148,backgroundColor:C.card,borderRadius:20,padding:14,borderWidth:0.5,borderColor:C.border2,...SHADOW.card}}>
+                <View style={{width:52,height:52,borderRadius:16,backgroundColor:`${item.color}18`,alignItems:'center',justifyContent:'center',marginBottom:10,borderWidth:0.5,borderColor:`${item.color}30`}}>
+                  <Text style={{fontSize:28}}>{item.emoji}</Text>
+                </View>
+                <Text style={{fontSize:13,fontWeight:'700',color:C.text,lineHeight:17,marginBottom:4}}>{item.name}</Text>
+                <Text style={{fontSize:10,color:C.muted,lineHeight:14,marginBottom:10}}>{item.desc}</Text>
+                <TouchableOpacity
+                  style={{paddingVertical:7,borderRadius:20,alignItems:'center',
+                    backgroundColor:notified?C.greenBg:`${item.color}15`,
+                    borderWidth:0.5,borderColor:notified?C.greenBd:`${item.color}30`}}
+                  onPress={()=>{
+                    if(notified) return;
+                    setNotified(true);
+                    // Save interest to Firestore
+                    if(!DEMO_MODE && user){
+                      firestore().collection('service_interests').add({
+                        serviceId:item.id, serviceName:item.name,
+                        userId:phone, userPhone:phone,
+                        createdAt:firestore.FieldValue.serverTimestamp(),
+                      }).catch(e=>console.log('service_interest:',e));
+                    }
+                  }}>
+                  <Text style={{fontSize:10,fontWeight:'700',color:notified?C.green:item.color}}>
+                    {notified?'✅ Notified!':'🔔 Notify Me'}
+                  </Text>
+                </TouchableOpacity>
               </View>
-              <DText style={{fontSize:13,fontWeight:'700',color:C.text,lineHeight:17,marginBottom:4}}>{item.name}</DText>
-              <Text style={{fontSize:10,color:C.muted,lineHeight:14,marginBottom:8}}>{item.sub}</Text>
-              <View style={{backgroundColor:`${item.color}15`,paddingHorizontal:8,paddingVertical:3,borderRadius:20,alignSelf:'flex-start',borderWidth:0.5,borderColor:`${item.color}30`}}>
-                <Text style={{fontSize:9,color:item.color,fontWeight:'700'}}>{item.tag}</Text>
-              </View>
-            </View>
-          ))}
+            );
+          })}
         </ScrollView>
       </View>
 
@@ -2162,16 +2824,52 @@ export default function App() {
           </TouchableOpacity>
         ))}
 
-        {/* Coming Soon services */}
-        <Text style={{fontSize:13,fontWeight:'700',color:C.muted,marginHorizontal:16,marginTop:8,marginBottom:10,letterSpacing:0.8}}>COMING SOON</Text>
+        {/* Coming Soon — VEGA task services (Change 7) */}
+        <Text style={{fontSize:13,fontWeight:'700',color:C.muted,marginHorizontal:16,marginTop:8,marginBottom:10,letterSpacing:0.8}}>COMING SOON IN VIZAG</Text>
+        {/* Task-based coming soon (Chimney, Mattress, Sofa Deep) */}
+        {COMING_SOON_TASKS.map((task)=>{
+          const [notified,setNotified]=React.useState(false);
+          return(
+            <View key={task.id} style={{flexDirection:'row',alignItems:'center',backgroundColor:C.card,marginHorizontal:16,marginBottom:10,borderRadius:20,padding:14,borderWidth:0.5,borderColor:C.border2,overflow:'hidden'}}>
+              <View style={{position:'absolute',left:0,top:0,bottom:0,width:5,backgroundColor:task.color}}/>
+              <View style={{width:52,height:52,borderRadius:16,backgroundColor:`${task.color}15`,alignItems:'center',justifyContent:'center',marginRight:14,marginLeft:10,borderWidth:0.5,borderColor:`${task.color}30`}}>
+                <Text style={{fontSize:26}}>{task.emoji}</Text>
+              </View>
+              <View style={{flex:1}}>
+                <DText style={{fontSize:14,fontWeight:'700',color:C.text}}>{task.name}</DText>
+                <Text style={{fontSize:12,color:C.muted,marginTop:2}} numberOfLines={1}>{task.desc}</Text>
+              </View>
+              <TouchableOpacity
+                style={{paddingHorizontal:12,paddingVertical:6,borderRadius:16,
+                  backgroundColor:notified?C.greenBg:`${task.color}15`,
+                  borderWidth:0.5,borderColor:notified?C.greenBd:`${task.color}30`}}
+                onPress={()=>{
+                  if(notified) return;
+                  setNotified(true);
+                  if(!DEMO_MODE&&user){
+                    firestore().collection('service_interests').add({
+                      serviceId:task.id, serviceName:task.name,
+                      userId:phone, userPhone:phone,
+                      createdAt:firestore.FieldValue.serverTimestamp(),
+                    }).catch(e=>console.log('service_interest:',e));
+                  }
+                }}>
+                <Text style={{fontSize:11,fontWeight:'700',color:notified?C.green:task.color}}>
+                  {notified?'✅ Notified':'🔔 Notify Me'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          );
+        })}
+        {/* Full services coming soon (Sofa, Beauty, Deep, Elder) */}
         {SERVICES.filter(s=>['sofa','beauty','deep','elder'].includes(s.id)).map((svc)=>(
           <View key={svc.id} style={{flexDirection:'row',alignItems:'center',backgroundColor:C.card,marginHorizontal:16,marginBottom:10,borderRadius:20,padding:14,borderWidth:0.5,borderColor:C.border2,overflow:'hidden',opacity:0.65}}>
             <View style={{position:'absolute',left:0,top:0,bottom:0,width:5,backgroundColor:C.muted2}}/>
-            <View style={{width:56,height:56,borderRadius:18,backgroundColor:C.light,alignItems:'center',justifyContent:'center',marginRight:14,marginLeft:10}}>
-              <Text style={{fontSize:28}}>{svc.icon}</Text>
+            <View style={{width:52,height:52,borderRadius:16,backgroundColor:C.light,alignItems:'center',justifyContent:'center',marginRight:14,marginLeft:10}}>
+              <Text style={{fontSize:26}}>{svc.icon}</Text>
             </View>
             <View style={{flex:1}}>
-              <DText style={{fontSize:15,fontWeight:'700',color:C.muted}}>{svc.shortName}</DText>
+              <DText style={{fontSize:14,fontWeight:'700',color:C.muted}}>{svc.shortName}</DText>
               <Text style={{fontSize:12,color:C.muted2,marginTop:2}} numberOfLines={1}>{svc.tagline}</Text>
             </View>
             <Badge label="Coming Soon" color={C.muted} style={{marginRight:4}}/>
@@ -2190,77 +2888,145 @@ export default function App() {
     </SafeAreaView>
   );
 
-  const BookingsTab=()=>(
-    <SafeAreaView style={{flex:1,backgroundColor:C.bg}}>
-      <View style={[S.topBar,{paddingTop:52}]}>
-        <View style={{width:36}}/><DText style={[S.topTitle,{fontSize:20}]}>My Bookings</DText><View style={{width:36}}/>
-      </View>
-      <ScrollView style={{flex:1,padding:16}}>
-        {orders.length===0?(
-          <View style={{alignItems:'center',paddingTop:80}}>
-            <Text style={{fontSize:60,marginBottom:16}}>📋</Text>
-            <DText style={{color:C.text,fontSize:18,fontWeight:'700',marginBottom:8}}>No bookings yet</DText>
-            <Text style={{color:C.muted,fontSize:14,marginBottom:28,textAlign:'center'}}>{user?'Book your first VEGA service!':'Login to see your bookings'}</Text>
-            <TouchableOpacity style={S.btn} onPress={()=>user?setTab('services'):setScreen('login')}><Text style={S.btnT}>{user?'Book Now':'Login'}</Text></TouchableOpacity>
-          </View>
-        ):orders.map(o=>(
-          <TouchableOpacity key={o.orderId} style={{backgroundColor:C.card,borderRadius:22,marginBottom:12,overflow:'hidden',...SHADOW.soft}} onPress={()=>{setTrackOrd(o);setScreen('track');}}>
-            <View style={{height:5,backgroundColor:C.orange}}/>
-            <View style={{padding:16}}>
-              <View style={{flexDirection:'row',justifyContent:'space-between',marginBottom:10}}>
-                <Text style={{color:C.orange,fontWeight:'700',letterSpacing:0.5}}>#{o.orderId}</Text>
-                <View style={{flexDirection:'row',gap:6,alignItems:'center'}}>
-                  {o.rated&&<Text style={{fontSize:11}}>{'⭐'.repeat(o.rating||0)}</Text>}
-                  <Badge label={o.status} color={C.green}/>
-                </View>
+  // ── Change 5: BookingsTab — TODAY / UPCOMING / PAST sections ──────────────
+  const BookingsTab=()=>{
+    const todayStr = new Date().toISOString().split('T')[0];
+    // Filter out recurring child docs from main view (they appear inside parent)
+    const parentOrders = orders.filter(o=>!o.isRecurringChild);
+    // Categorise
+    const todayOrders    = parentOrders.filter(o=>{
+      if(o.bookingMode==='instant') return true;
+      if(!o.scheduledDate) return true;
+      return o.scheduledDate === todayStr;
+    });
+    const upcomingOrders = parentOrders.filter(o=>{
+      if(o.bookingMode==='instant') return false;
+      return o.scheduledDate && o.scheduledDate > todayStr && o.status!=='completed' && o.status!=='cancelled';
+    });
+    const pastOrders     = parentOrders.filter(o=>
+      o.status==='completed'||o.status==='cancelled'||(o.scheduledDate&&o.scheduledDate<todayStr&&o.status!=='confirmed')
+    );
+
+    const OrderCard = ({o, showVisits=false})=>{
+      const childVisits = orders.filter(c=>c.parentOrderId===o.orderId&&c.isRecurringChild);
+      const [expanded,setExpanded]=React.useState(false);
+      return(
+        <TouchableOpacity style={{backgroundColor:C.card,borderRadius:22,marginBottom:10,overflow:'hidden',...SHADOW.soft}}
+          onPress={()=>{setTrackOrd(o);setScreen('track');}}>
+          <View style={{height:4,backgroundColor:o.bookingMode==='recurring'?C.gold:o.status==='completed'?C.green:C.orange}}/>
+          <View style={{padding:14}}>
+            <View style={{flexDirection:'row',justifyContent:'space-between',marginBottom:8}}>
+              <View style={{flexDirection:'row',alignItems:'center',gap:6}}>
+                <Text style={{color:C.orange,fontWeight:'700',fontSize:12}}>#{o.orderId}</Text>
+                {o.bookingMode==='recurring'&&<View style={{backgroundColor:C.goldBg,paddingHorizontal:7,paddingVertical:2,borderRadius:8,borderWidth:0.5,borderColor:C.goldBd}}><Text style={{color:C.gold,fontSize:9,fontWeight:'700'}}>🔄 {o.recurFreq}</Text></View>}
               </View>
-              {o.professional&&(
-                <View style={{flexDirection:'row',alignItems:'center',gap:8,marginBottom:12,backgroundColor:C.bg,borderRadius:12,padding:10,borderWidth:0.5,borderColor:C.border2}}>
-                  <View style={{width:32,height:32,borderRadius:16,backgroundColor:o.professional.color+'22',alignItems:'center',justifyContent:'center'}}>
-                    <DText style={{fontSize:14,fontWeight:'700',color:o.professional.color}}>{o.professional.initial}</DText>
-                  </View>
-                  <Text style={{fontSize:13,fontWeight:'600',color:C.text}}>{o.professional.name}</Text>
-                  <Text style={{fontSize:12,color:C.muted}}>· ★ {o.professional.rating}</Text>
-                </View>
-              )}
-              {o.items?.slice(0,2).map((item,i)=>(
-                <View key={i} style={{flexDirection:'row',alignItems:'center',gap:10,marginBottom:8}}>
-                  <View style={{width:40,height:40,borderRadius:12,backgroundColor:C.orangeSolid,alignItems:'center',justifyContent:'center'}}><Text style={{fontSize:20}}>{item.icon}</Text></View>
-                  <View style={{flex:1}}>
-                    <Text style={{fontWeight:'600',color:C.text,fontSize:13}} numberOfLines={1}>{item.name}</Text>
-                    {item.extras?.length>0&&<Text style={{fontSize:10,color:C.green}} numberOfLines={1}>+ {item.extras.join(', ')}</Text>}
-                  </View>
-                  <DText style={{color:C.orange,fontWeight:'700',fontSize:14}}>₹{item.price}</DText>
-                </View>
-              ))}
-              <View style={{height:1,backgroundColor:C.border,marginVertical:10}}/>
-              <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center'}}>
-                <View style={{flex:1,gap:4}}>
-                  <Text style={{color:C.muted,fontSize:12}}>📅 {o.slot?.split(',')[0]||o.slot}</Text>
-                  {o.bookingMode==='recurring'&&o.recurFreq&&(
-                    <View style={{flexDirection:'row',alignItems:'center',gap:4}}>
-                      <View style={{backgroundColor:C.goldBg,paddingHorizontal:8,paddingVertical:3,borderRadius:10,borderWidth:0.5,borderColor:C.goldBd}}>
-                        <Text style={{color:C.gold,fontSize:11,fontWeight:'700'}}>🔄 {o.recurFreq}</Text>
-                      </View>
-                      {o.isRecurringChild&&<Text style={{color:C.muted,fontSize:10}}>#{o.recurIndex+1}</Text>}
-                    </View>
-                  )}
-                </View>
-                <View style={{flexDirection:'row',alignItems:'center',gap:8}}>
-                  <DText style={{color:C.orange,fontWeight:'700',fontSize:16}}>₹{o.total}</DText>
-                  {!o.rated&&(
-                    <TouchableOpacity style={{backgroundColor:C.orangeBg,paddingHorizontal:12,paddingVertical:5,borderRadius:20,borderWidth:0.5,borderColor:C.orangeBd}} onPress={()=>{setRatingOrd(o);setUserRating(0);setRatingNote('');setScreen('rate');}}>
-                      <Text style={{color:C.orange,fontSize:12,fontWeight:'700'}}>Rate ⭐</Text>
-                    </TouchableOpacity>
-                  )}
-                </View>
+              <View style={{flexDirection:'row',gap:6,alignItems:'center'}}>
+                {o.rated&&<Text style={{fontSize:10}}>{'⭐'.repeat(Math.min(o.rating||0,5))}</Text>}
+                <Badge label={o.status||'confirmed'} color={o.status==='completed'?C.green:o.status==='cancelled'?C.red:C.orange}/>
               </View>
             </View>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
-    </SafeAreaView>
-  );
+            {o.items?.slice(0,2).map((item,i)=>(
+              <View key={i} style={{flexDirection:'row',alignItems:'center',gap:10,marginBottom:6}}>
+                <View style={{width:38,height:38,borderRadius:12,backgroundColor:C.orangeSolid,alignItems:'center',justifyContent:'center'}}><Text style={{fontSize:18}}>{item.icon}</Text></View>
+                <View style={{flex:1}}><Text style={{fontWeight:'600',color:C.text,fontSize:13}} numberOfLines={1}>{item.name}</Text></View>
+                <DText style={{color:C.orange,fontWeight:'700',fontSize:13}}>₹{item.price}</DText>
+              </View>
+            ))}
+            <View style={{height:0.5,backgroundColor:C.border,marginVertical:8}}/>
+            <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center'}}>
+              <Text style={{color:C.muted,fontSize:11,flex:1}} numberOfLines={1}>📅 {o.slot?.split('·')[0]||o.slot}</Text>
+              <View style={{flexDirection:'row',gap:6,alignItems:'center'}}>
+                <DText style={{color:C.orange,fontWeight:'700',fontSize:14}}>₹{o.total}</DText>
+                {!o.rated&&o.status==='completed'&&(
+                  <TouchableOpacity style={{backgroundColor:C.orangeBg,paddingHorizontal:10,paddingVertical:4,borderRadius:16,borderWidth:0.5,borderColor:C.orangeBd}}
+                    onPress={(e)=>{e.stopPropagation?.();setRatingOrd(o);setUserRating(0);setRatingNote('');setScreen('rate');}}>
+                    <Text style={{color:C.orange,fontSize:11,fontWeight:'700'}}>Rate ⭐</Text>
+                  </TouchableOpacity>
+                )}
+                {o.status==='completed'&&(
+                  <TouchableOpacity style={{backgroundColor:C.orangeSolid,paddingHorizontal:10,paddingVertical:4,borderRadius:16,borderWidth:0.5,borderColor:C.orangeBd}}
+                    onPress={(e)=>{e.stopPropagation?.();setTab('services');}}>
+                    <Text style={{color:C.orange,fontSize:11,fontWeight:'700'}}>🔄 Again</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            </View>
+            {/* Recurring visits expandable (Change 5) */}
+            {o.bookingMode==='recurring'&&childVisits.length>0&&(
+              <TouchableOpacity style={{marginTop:8,backgroundColor:C.goldSolid,borderRadius:10,padding:10,borderWidth:0.5,borderColor:C.goldBd,flexDirection:'row',alignItems:'center',justifyContent:'space-between'}}
+                onPress={(e)=>{e.stopPropagation?.();setExpanded(ex=>!ex);}}>
+                <Text style={{color:C.gold,fontWeight:'700',fontSize:11}}>📆 {childVisits.length} upcoming visits</Text>
+                <Text style={{color:C.gold,fontSize:14}}>{expanded?'▲':'▼'}</Text>
+              </TouchableOpacity>
+            )}
+            {expanded&&childVisits.map((cv,ci)=>(
+              <View key={ci} style={{backgroundColor:C.goldSolid,marginTop:4,borderRadius:10,padding:10,flexDirection:'row',alignItems:'center',gap:8,borderWidth:0.5,borderColor:C.goldBd}}>
+                <View style={{width:22,height:22,borderRadius:11,backgroundColor:C.gold,alignItems:'center',justifyContent:'center'}}>
+                  <Text style={{color:'#FFF',fontSize:10,fontWeight:'800'}}>{ci+2}</Text>
+                </View>
+                <Text style={{fontSize:11,color:C.text,flex:1}} numberOfLines={1}>{cv.slot?.split('·')[1]||cv.scheduledDate}</Text>
+                <Badge label={cv.status||'scheduled'} color={C.gold}/>
+              </View>
+            ))}
+          </View>
+        </TouchableOpacity>
+      );
+    };
+
+    const SectionHeader = ({title,count,color=C.orange})=>(
+      <View style={{flexDirection:'row',alignItems:'center',gap:8,marginBottom:10,marginTop:4}}>
+        <View style={{width:4,height:18,borderRadius:2,backgroundColor:color}}/>
+        <Text style={{fontWeight:'800',fontSize:13,color:C.text,letterSpacing:0.5}}>{title}</Text>
+        {count>0&&<View style={{backgroundColor:`${color}18`,paddingHorizontal:8,paddingVertical:2,borderRadius:10,borderWidth:0.5,borderColor:`${color}30`}}>
+          <Text style={{color,fontSize:11,fontWeight:'700'}}>{count}</Text>
+        </View>}
+      </View>
+    );
+
+    return(
+      <SafeAreaView style={{flex:1,backgroundColor:C.bg}}>
+        <View style={[S.topBar,{paddingTop:52}]}>
+          <View style={{width:36}}/><DText style={[S.topTitle,{fontSize:20}]}>My Bookings</DText><View style={{width:36}}/>
+        </View>
+        <ScrollView style={{flex:1,padding:16}}>
+          {parentOrders.length===0?(
+            <View style={{alignItems:'center',paddingTop:80}}>
+              <Text style={{fontSize:60,marginBottom:16}}>📋</Text>
+              <DText style={{color:C.text,fontSize:18,fontWeight:'700',marginBottom:8}}>No bookings yet</DText>
+              <Text style={{color:C.muted,fontSize:14,marginBottom:28,textAlign:'center'}}>{user?'Book your first VEGA service!':'Login to see your bookings'}</Text>
+              <TouchableOpacity style={S.btn} onPress={()=>user?setTab('services'):setScreen('login')}><Text style={S.btnT}>{user?'Book Now':'Login'}</Text></TouchableOpacity>
+            </View>
+          ):(
+            <>
+              {todayOrders.length>0&&(
+                <>
+                  <SectionHeader title="TODAY" count={todayOrders.length} color={C.green}/>
+                  {todayOrders.map(o=><OrderCard key={o.orderId} o={o}/>)}
+                </>
+              )}
+              {upcomingOrders.length>0&&(
+                <>
+                  <SectionHeader title="UPCOMING" count={upcomingOrders.length} color={C.orange}/>
+                  {upcomingOrders.map(o=><OrderCard key={o.orderId} o={o} showVisits/>)}
+                </>
+              )}
+              {pastOrders.length>0&&(
+                <>
+                  <SectionHeader title="PAST" count={pastOrders.length} color={C.muted}/>
+                  {pastOrders.map(o=><OrderCard key={o.orderId} o={o}/>)}
+                </>
+              )}
+              {/* If none categorized, show all */}
+              {todayOrders.length===0&&upcomingOrders.length===0&&pastOrders.length===0&&(
+                parentOrders.map(o=><OrderCard key={o.orderId} o={o}/>)
+              )}
+              <View style={{height:40}}/>
+            </>
+          )}
+        </ScrollView>
+      </SafeAreaView>
+    );
+  };
 
   const OffersTab=()=>(
     <SafeAreaView style={{flex:1,backgroundColor:C.bg}}>
