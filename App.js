@@ -878,6 +878,16 @@ export default function App() {
     return ()=>unsub();
   },[trackOrd?.assignedWorkerId]);
 
+  // ── Keep trackOrd in sync with live orders ─────────────────────────
+  // When worker taps On My Way / Service Started / Completed, the orders
+  // array updates via onSnapshot. Sync that into trackOrd so the tracking
+  // screen reflects status changes in real time (within ~3 seconds).
+  useEffect(()=>{
+    if(!trackOrd) return;
+    const updated = orders.find(o => o.id === trackOrd.id || o.orderId === trackOrd.orderId);
+    if(updated && updated.status !== trackOrd.status) setTrackOrd(updated);
+  },[orders]);
+
   const addonTotal  = selAddons.reduce((s,id)=>{const a=selSvc?.addons?.find(x=>x.id===id);return s+(a?a.price:0);},0);
   const unitPrice   = selDur?selDur.price:0;
   const totalPrice  = unitPrice + addonTotal;
@@ -2418,7 +2428,17 @@ export default function App() {
           </Card>
           <Card style={{marginBottom:12}}>
             <DText style={{fontWeight:'700',color:C.text,fontSize:15,marginBottom:16}}>Live Status</DText>
-            {[{l:'Booking Confirmed',done:true,t:trackOrd.time},{l:'Professional Assigned',done:true,t:pro?.name+' assigned'},{l:'On the Way',done:false,t:''},{l:'Service Started',done:false,t:''},{l:'Completed',done:false,t:''}].map((step,i)=>(
+            {(()=>{
+              const st = trackOrd.status||'confirmed';
+              const isWay  = ['on_the_way','in_progress','completed'].includes(st);
+              const isProg = ['in_progress','completed'].includes(st);
+              const isDone = st==='completed';
+              return [{l:'Booking Confirmed',done:true,t:trackOrd.time||''},
+                {l:'Professional Assigned',done:!!trackOrd.assignedWorkerId,t:trackOrd.assignedWorkerName||''},
+                {l:'On the Way',done:isWay,t:isWay?'Professional is on the way':''},
+                {l:'Service Started',done:isProg,t:isProg?'Service in progress':''},
+                {l:'Completed',done:isDone,t:isDone?'Service completed ✅':''}];
+            })().map((step,i)=>(
               <View key={i} style={{flexDirection:'row',alignItems:'flex-start',marginBottom:i<4?14:0}}>
                 <View style={{alignItems:'center',marginRight:14}}>
                   <View style={{width:30,height:30,borderRadius:15,alignItems:'center',justifyContent:'center',backgroundColor:step.done?C.orange:C.light,...(step.done?SHADOW.glow:{})}}>
