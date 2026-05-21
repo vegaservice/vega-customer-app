@@ -129,30 +129,38 @@ const getMapUrl = (area, building) => {
 };
 const DEFAULT_MAP_URL = `https://maps.googleapis.com/maps/api/staticmap?center=Madhurawada,Visakhapatnam,AP,India&zoom=14&size=600x240&scale=2&maptype=roadmap&key=${MAPS_API_KEY}`;
 
-// ── FIX 3: PROFESSIONAL ICONS — Icons8 Fluency pack (free with attribution)
+// ── 3D ICONS — local bundled assets (no internet needed) ──────────────
 const SVC_ICONS = {
-  cleaning: 'https://img.icons8.com/3d-fluency/128/broom.png',
-  bathroom: 'https://img.icons8.com/3d-fluency/128/bathroom.png',
-  kitchen:  'https://img.icons8.com/3d-fluency/128/stove.png',
-  car:      'https://img.icons8.com/3d-fluency/128/car.png',
+  cleaning: require('./assets/icons/home-clean.png'),
+  bathroom: require('./assets/icons/bathroom.png'),
+  kitchen:  require('./assets/icons/kitchen.png'),
+  car:      require('./assets/icons/car-clean.png'),
+  beauty:   require('./assets/icons/beauty.png'),
+  // CDN fallbacks for icons not yet downloaded locally
   sofa:     'https://img.icons8.com/3d-fluency/128/sofa.png',
-  beauty:   'https://img.icons8.com/3d-fluency/128/beauty.png',
   vacuum:   'https://img.icons8.com/3d-fluency/128/vacuum-cleaner.png',
   elder:    'https://img.icons8.com/3d-fluency/128/elderly-person.png',
   cook:     'https://img.icons8.com/3d-fluency/128/cooking-pot.png',
   repair:   'https://img.icons8.com/3d-fluency/128/maintenance.png',
 };
-// Maps service id → SVC_ICONS key so Icon3D can show real 3D images
+// Maps service id → SVC_ICONS key
 const SVC_ICON_MAP = {
   home: 'cleaning', bathroom: 'bathroom', kitchen: 'kitchen',
   car:  'car',      sofa:     'sofa',     beauty:  'beauty',
   deep: 'vacuum',   elder:    'elder',    cook:    'cook',   repair: 'repair',
 };
+// Helper — returns Image source for any service id (handles both local require + CDN uri)
+const svcImgSource = (svcId) => {
+  const icon = SVC_ICONS[SVC_ICON_MAP[svcId]];
+  if(!icon) return null;
+  return typeof icon === 'string' ? { uri: icon } : icon;
+};
 const SvcIcon = ({ id, emoji, size=40, style }) => {
   const [err, setErr] = React.useState(false);
-  const uri = SVC_ICONS[id];
-  if (!uri || err) return <Text style={{ fontSize:size*0.75, lineHeight:size, ...style }}>{emoji}</Text>;
-  return <Image source={{ uri }} style={{ width:size, height:size, ...style }} resizeMode="contain" onError={()=>setErr(true)} />;
+  const icon = SVC_ICONS[id];
+  if (!icon || err) return <Text style={{ fontSize:size*0.75, lineHeight:size, ...style }}>{emoji}</Text>;
+  const source = typeof icon === 'string' ? { uri: icon } : icon;
+  return <Image source={source} style={{ width:size, height:size, ...style }} resizeMode="contain" onError={()=>setErr(true)} />;
 };
 
 
@@ -651,7 +659,7 @@ const Icon3D = ({ svc, onPress }) => {
     ]).start(() => onPress?.());
   };
   const sz = COL - 8;
-  const iconUri = SVC_ICONS[SVC_ICON_MAP[svc.id]] || null;
+  const iconUri = svcImgSource(svc.id);
   return (
     <TouchableOpacity activeOpacity={1} onPress={handlePress} style={{ width:COL, alignItems:'center', marginBottom:20 }}>
       <Animated.View style={{ transform:[{ scale:scaleAnim }], alignItems:'center' }}>
@@ -674,7 +682,7 @@ const Icon3D = ({ svc, onPress }) => {
           {/* Top-left shine */}
           <View style={{ position:'absolute', top:7, left:7, width:sz*0.44, height:sz*0.32, borderRadius:12, backgroundColor:'rgba(255,255,255,0.28)' }}/>
           {iconUri
-            ? <Image source={{ uri: iconUri }} style={{ width:sz*0.58, height:sz*0.58 }} resizeMode="contain"/>
+            ? <Image source={iconUri} style={{ width:sz*0.58, height:sz*0.58 }} resizeMode="contain"/>
             : <Text style={{ fontSize:sz*0.42, lineHeight:sz*0.52 }}>{svc.icon}</Text>}
         </View>
         {/* Star badge */}
@@ -1462,7 +1470,9 @@ export default function App() {
                   <Text style={{color:'rgba(255,255,255,0.95)',fontSize:10,fontWeight:'700',letterSpacing:0.3}}>⭐ {svc.badge}</Text>
                 </View>}
               </View>
-              <Text style={{fontSize:48,marginRight:16}}>{svc.icon}</Text>
+              {svcImgSource(svc.id)
+                ? <Image source={svcImgSource(svc.id)} style={{width:56,height:56,marginRight:16}} resizeMode="contain"/>
+                : <Text style={{fontSize:48,marginRight:16}}>{svc.icon}</Text>}
               <View style={{flex:1}}>
                 <DText style={{fontSize:22,fontWeight:'700',color:'#FFF'}}>{svc.shortName}</DText>
                 <Text style={{fontSize:13,color:'rgba(255,255,255,0.85)',marginTop:3,lineHeight:18}}>{svc.tagline}</Text>
@@ -2623,8 +2633,10 @@ export default function App() {
           {SERVICES.filter(s=>['home','bathroom','kitchen','car'].includes(s.id)).map(svc=>(
             <TouchableOpacity key={svc.id} onPress={()=>openService(svc)}
               style={{width:(W-42)/2,backgroundColor:C.card,borderRadius:18,padding:14,borderWidth:0.5,borderColor:C.border2,...SHADOW.card}}>
-              <View style={{width:'100%',height:80,borderRadius:12,backgroundColor:`${svc.color}15`,alignItems:'center',justifyContent:'center',marginBottom:10}}>
-                <Text style={{fontSize:42}}>{svc.icon}</Text>
+              <View style={{width:'100%',height:80,borderRadius:12,backgroundColor:`${svc.iconBg}22`,alignItems:'center',justifyContent:'center',marginBottom:10}}>
+                {svcImgSource(svc.id)
+                  ? <Image source={svcImgSource(svc.id)} style={{width:56,height:56}} resizeMode="contain"/>
+                  : <Text style={{fontSize:42}}>{svc.icon}</Text>}
               </View>
               <Text style={{fontSize:14,fontWeight:'700',color:C.text,marginBottom:2}} numberOfLines={1}>{svc.name}</Text>
               <Text style={{fontSize:11,color:C.muted,marginBottom:6}} numberOfLines={1}>{svc.desc||'Full package service'}</Text>
@@ -2860,7 +2872,9 @@ export default function App() {
           <TouchableOpacity key={svc.id} style={{flexDirection:'row',alignItems:'center',backgroundColor:C.card,marginHorizontal:16,marginBottom:10,borderRadius:20,padding:14,borderWidth:0.5,borderColor:C.border2,overflow:'hidden',...SHADOW.card}} onPress={()=>openService(svc)}>
             <View style={{position:'absolute',left:0,top:0,bottom:0,width:5,backgroundColor:svc.gradient[0]}}/>
             <View style={{width:56,height:56,borderRadius:18,backgroundColor:svc.iconBg,alignItems:'center',justifyContent:'center',marginRight:14,marginLeft:10,borderBottomWidth:4,borderBottomColor:svc.gradient[1],...SHADOW.card,shadowColor:svc.gradient[1]}}>
-              <Text style={{fontSize:28}}>{svc.icon}</Text>
+              {svcImgSource(svc.id)
+                ? <Image source={svcImgSource(svc.id)} style={{width:38,height:38}} resizeMode="contain"/>
+                : <Text style={{fontSize:28}}>{svc.icon}</Text>}
             </View>
             <View style={{flex:1}}>
               <DText style={{fontSize:15,fontWeight:'700',color:C.text}}>{svc.shortName}</DText>
@@ -2914,7 +2928,9 @@ export default function App() {
           <View key={svc.id} style={{flexDirection:'row',alignItems:'center',backgroundColor:C.card,marginHorizontal:16,marginBottom:10,borderRadius:20,padding:14,borderWidth:0.5,borderColor:C.border2,overflow:'hidden',opacity:0.65}}>
             <View style={{position:'absolute',left:0,top:0,bottom:0,width:5,backgroundColor:C.muted2}}/>
             <View style={{width:52,height:52,borderRadius:16,backgroundColor:C.light,alignItems:'center',justifyContent:'center',marginRight:14,marginLeft:10}}>
-              <Text style={{fontSize:26}}>{svc.icon}</Text>
+              {svcImgSource(svc.id)
+                ? <Image source={svcImgSource(svc.id)} style={{width:34,height:34,opacity:0.65}} resizeMode="contain"/>
+                : <Text style={{fontSize:26}}>{svc.icon}</Text>}
             </View>
             <View style={{flex:1}}>
               <DText style={{fontSize:14,fontWeight:'700',color:C.muted}}>{svc.shortName}</DText>
@@ -3272,7 +3288,9 @@ export default function App() {
               SERVICES.filter(s=>s.shortName.toLowerCase().includes(search.toLowerCase())).map((svc,i)=>(
                 <TouchableOpacity key={i} style={{flexDirection:'row',alignItems:'center',gap:14,paddingVertical:13,borderBottomWidth:0.5,borderBottomColor:C.border2}} onPress={()=>{openService(svc);setShowSearch(false);setSearch('');}}>
                   <View style={{width:52,height:52,borderRadius:16,backgroundColor:svc.iconBg,alignItems:'center',justifyContent:'center',borderBottomWidth:3,borderBottomColor:svc.gradient[1],...SHADOW.card,shadowColor:svc.gradient[1]}}>
-                    <Text style={{fontSize:24}}>{svc.icon}</Text>
+                    {svcImgSource(svc.id)
+                      ? <Image source={svcImgSource(svc.id)} style={{width:34,height:34}} resizeMode="contain"/>
+                      : <Text style={{fontSize:24}}>{svc.icon}</Text>}
                   </View>
                   <View style={{flex:1}}>
                     <DText style={{fontWeight:'700',color:C.text,fontSize:15}}>{svc.shortName}</DText>
