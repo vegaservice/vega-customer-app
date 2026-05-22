@@ -1,11 +1,7 @@
 // VEGA HOME SERVICES — Firestore Security Rules
 // ═══════════════════════════════════════════════════
-// HOW TO APPLY THESE RULES:
-// 1. Go to https://console.firebase.google.com
-// 2. Open: vega-home-service project
-// 3. Click: Firestore Database → Rules tab
-// 4. Replace the default rules with the content below
-// 5. Click: Publish
+// Phase 1 (launch): Permissive — any authenticated user can read/write
+// Phase 2 (after 100 customers): Tighten to per-user ownership checks
 // ═══════════════════════════════════════════════════
 
 rules_version = '2';
@@ -13,44 +9,89 @@ service cloud.firestore {
   match /databases/{database}/documents {
 
     // ── USERS ──────────────────────────────────────────────
-    // Phase 1 (launch): Permissive rules so app works reliably
-    // Phase 2 (after 100 customers): Tighten with request.auth checks
     match /users/{userId} {
-      allow read: if request.auth != null;
+      allow read:   if request.auth != null;
       allow create: if request.auth != null;
       allow update: if request.auth != null;
       allow delete: if false;
     }
 
-    // ── BOOKINGS ──────────────────────────────────────────
-    match /bookings/{bookingId} {
-      allow read: if request.auth != null;
-      allow create: if request.auth != null;
-      allow update: if request.auth != null;
-      allow delete: if false;
-    }
-
-    // ── PROFESSIONALS ─────────────────────────────────────
-    match /professionals/{proId} {
-      allow read: if request.auth != null;
-      allow create, update, delete: if false;  // Admin only (via console for now)
-    }
-
-    // ── APP CONFIG (promo codes, settings) ────────────────
-    match /app_config/{doc} {
-      allow read: if request.auth != null;
-      allow write: if false;  // Admin only
-    }
-
-    // ── AREAS (Vizag serviceable areas) ───────────────────
-    match /areas/{areaId} {
-      allow read: if request.auth != null;
-      allow write: if false;  // Admin only
-    }
-
-    // ── SUBCOLLECTION: users/{id}/bookings ────────────────
+    // ── USER SUBCOLLECTION: bookings (mirror) ──────────────
     match /users/{userId}/bookings/{bookingId} {
       allow read, write: if request.auth != null;
+    }
+
+    // ── USER SUBCOLLECTION: saved addresses (Bug 7) ────────
+    match /users/{userId}/addresses/{addressId} {
+      allow read, write: if request.auth != null;
+    }
+
+    // ── BOOKINGS (top-level) ───────────────────────────────
+    match /bookings/{bookingId} {
+      allow read:   if request.auth != null;
+      allow create: if request.auth != null;
+      allow update: if request.auth != null;
+      allow delete: if false;
+    }
+
+    // ── WORKERS (location tracking, assignment) ────────────
+    match /workers/{workerId} {
+      allow read:   if request.auth != null;
+      allow create: if request.auth != null;
+      allow update: if request.auth != null;
+      allow delete: if false;
+    }
+
+    // ── WALLET TRANSACTIONS (Bug 2 — audit trail for credits) ─
+    match /wallet_transactions/{txnId} {
+      allow read:   if request.auth != null;
+      allow create: if request.auth != null;
+      allow update: if false;   // Immutable ledger — never edit
+      allow delete: if false;
+    }
+
+    // ── SERVICE INTERESTS (analytics: which services tapped) ─
+    match /service_interests/{interestId} {
+      allow read:   if request.auth != null;
+      allow create: if request.auth != null;
+      allow update: if false;
+      allow delete: if false;
+    }
+
+    // ── REFERRALS (track who-referred-who, prevent abuse) ──
+    match /referrals/{referralId} {
+      allow read:   if request.auth != null;
+      allow create: if request.auth != null;
+      allow update: if request.auth != null;
+      allow delete: if false;
+    }
+
+    // ── PROFESSIONALS (legacy — kept for compatibility) ────
+    match /professionals/{proId} {
+      allow read: if request.auth != null;
+      allow create, update, delete: if false;
+    }
+
+    // ── APP CONFIG (promo codes, pricing, settings) ────────
+    match /app_config/{doc} {
+      allow read: if request.auth != null;
+      allow write: if false;   // Admin only (via console)
+    }
+
+    // ── AREAS (Vizag serviceable areas) ────────────────────
+    match /areas/{areaId} {
+      allow read: if request.auth != null;
+      allow write: if false;   // Admin only
+    }
+
+    // ── FCM TOKENS (push notification targets) ─────────────
+    match /fcm_tokens/{tokenId} {
+      allow read, write: if request.auth != null;
+    }
+
+    // ── DEFAULT: deny everything else ──────────────────────
+    match /{document=**} {
+      allow read, write: if false;
     }
   }
 }

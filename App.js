@@ -63,6 +63,20 @@ const updateUserWallet = async (phone, newBalance) => {
   } catch (e) { console.error('updateUserWallet:', e); return false; }
 };
 
+// Bug 2: Audit trail for every wallet credit/debit (immutable ledger)
+const logWalletTransaction = async (phone, amount, reason, type = 'credit') => {
+  try {
+    await firestore().collection('wallet_transactions').add({
+      phone,
+      amount,
+      reason,           // 'signup_bonus' | 'referral_reward' | 'booking_refund' | 'rating_reward' | etc
+      type,             // 'credit' | 'debit'
+      timestamp: firestore.FieldValue.serverTimestamp(),
+    });
+    return true;
+  } catch (e) { console.error('logWalletTransaction:', e); return false; }
+};
+
 const createBooking = async (bookingData) => {
   try {
     const orderId = 'VG' + Date.now().toString().slice(-6);
@@ -797,7 +811,7 @@ export default function App() {
   const [cart,          setCart]          = useState([]);
   const [promoCode,     setPromoCode]     = useState('');
   const [appliedPromo,  setAppliedPromo]  = useState(null);
-  const [wallet,        setWallet]        = useState(200);
+  const [wallet,        setWallet]        = useState(0);    // Bug 2: NOT 200 — only real signups get bonus
   const [useWallet,     setUseWallet]     = useState(false);
   const [orders,        setOrders]        = useState([]);
   const [ordersUnsub,   setOrdersUnsub]   = useState(null);
@@ -834,33 +848,62 @@ export default function App() {
       Animated.spring(scaleA, {toValue:1,tension:35,friction:9,useNativeDriver:true}),
     ]).start();
     // ── Session Restore — keep user logged in between app opens ──
+    // FIX (Bug 6): setUser MUST fire whenever Firebase Auth has the user,
+    // regardless of whether the Firestore document exists. Otherwise the
+    // React `user` state stays null and every booking attempt triggers
+    // the login alert — making the app FEEL like it logged the user out.
     const unsubAuth = auth().onAuthStateChanged(async(fUser) => {
       if(fUser){
         try{
           const ph = fUser.phoneNumber?.replace('+91','');
           if(ph){
             setPhone(ph);
-            const existingUser = await getUser(ph);
-            if(existingUser){
-              const finalUser = {
-                name: existingUser.name||'Customer',
-                phone: `+91${ph}`,
-                code: existingUser.referralCode||('VG'+Math.random().toString(36).substr(2,5).toUpperCase()),
-                walletBalance: existingUser.walletBalance||0,
-              };
-              setUser(finalUser);
-              setWallet(existingUser.walletBalance||0);
-              const unsub = firestore().collection('bookings')
-                .where('userId','==',ph).orderBy('createdAt','desc').limit(50)
-                .onSnapshot(snap=>setOrders(snap.docs.map(d=>({id:d.id,...d.data()}))),
-                  err=>console.error('orders:',err));
-              setOrdersUnsub(()=>unsub);
-              registerCustomerFCM(ph);
+            let existingUser = await getUser(ph);
+
+            // ── HEAL: If Firestore doc missing (e.g. Bug 1 caused write fail
+            //    during signup), create a minimal doc now so future reads work.
+            //    NO wallet bonus here — bonus is only on real new-user signup
+            //    in verifyOTP (Bug 2). Existing logged-in users get nothing.
+            if(!existingUser){
+              const refCode = 'VG'+Math.random().toString(36).substr(2,5).toUpperCase();
+              await createOrUpdateUser(ph, {
+                name: 'Customer',
+                phone: ph,
+                walletBalance: 0,         // ← NO bonus on restore (Bug 2)
+                referralCode: refCode,
+                totalBookings: 0,
+                signupBonusGiven: false,  // ← Bug 2 flag — will be set true
+                                          //   only in real signup path
+                createdAt: new Date().toISOString(),
+                restoredFromAuth: true,   // ← marker for debugging / audit
+              });
+              existingUser = await getUser(ph);
             }
+
+            // ── ALWAYS setUser when Firebase Auth has the user (this IS the fix)
+            const finalUser = {
+              name: existingUser?.name || 'Customer',
+              phone: `+91${ph}`,
+              code: existingUser?.referralCode || ('VG'+Math.random().toString(36).substr(2,5).toUpperCase()),
+              walletBalance: existingUser?.walletBalance || 0,
+            };
+            setUser(finalUser);
+            setWallet(existingUser?.walletBalance || 0);
+
+            // Orders listener + FCM register (same as before)
+            const unsub = firestore().collection('bookings')
+              .where('userId','==',ph).orderBy('createdAt','desc').limit(50)
+              .onSnapshot(snap=>setOrders(snap.docs.map(d=>({id:d.id,...d.data()}))),
+                err=>console.error('orders:',err));
+            setOrdersUnsub(()=>unsub);
+            registerCustomerFCM(ph);
           }
         }catch(e){ console.log('session restore:',e); }
       }
-      setScreen('main'); // always show home — login required only to book
+      // Firebase Auth handles session persistence natively (secure storage).
+      // Token auto-refreshes — user stays logged in indefinitely until they
+      // tap Logout. No code here resets the session.
+      setScreen('main');
     });
     return ()=>unsubAuth();
   },[]);
@@ -1016,11 +1059,32 @@ export default function App() {
       const existingUser = await getUser(phone);
       let finalUser;
       if(existingUser){
-        // Returning user — load their data
-        finalUser = {name:existingUser.name||uname||'Customer',phone:`+91${phone}`,code:existingUser.referralCode||('VG'+Math.random().toString(36).substr(2,5).toUpperCase()),walletBalance:existingUser.walletBalance||200};
+        // ── RETURNING USER ──────────────────────────────────────────────
+        // Bug 2 FIX: use actual walletBalance (default 0, NOT 200) —
+        // otherwise every login shows ₹200 even if real balance is 0.
+        let walletBal = existingUser.walletBalance || 0;
+
+        // ── HEAL EDGE CASE: user doc exists but signup bonus never given
+        //    (e.g. created by session-restore heal-path which doesn't credit).
+        //    Credit it now, ONCE. Idempotent via signupBonusGiven flag.
+        if(!existingUser.signupBonusGiven){
+          walletBal = walletBal + 200;
+          await createOrUpdateUser(phone, {
+            walletBalance: walletBal,
+            signupBonusGiven: true,
+          });
+          await logWalletTransaction(phone, 200, 'signup_bonus', 'credit');
+        }
+
+        finalUser = {
+          name: existingUser.name || uname || 'Customer',
+          phone: `+91${phone}`,
+          code: existingUser.referralCode || ('VG'+Math.random().toString(36).substr(2,5).toUpperCase()),
+          walletBalance: walletBal,
+        };
         setUser(finalUser);
-        setWallet(existingUser.walletBalance||200);
-        // ✅ Real-time orders listener
+        setWallet(walletBal);
+
         const unsub = firestore().collection('bookings')
           .where('customerPhone','==',phone)
           .orderBy('createdAt','desc').limit(20)
@@ -1032,20 +1096,24 @@ export default function App() {
         setScreen('main');setTab('home');
         Alert.alert('🪷 Welcome back!',`Namaste ${finalUser.name}!`);
       }else{
-        // New user — create profile with signup bonus
+        // ── BRAND NEW USER — create profile + credit signup bonus ONCE ──
+        // Bug 2 FIX: signupBonusGiven flag prevents double-credit if this
+        // code path ever runs twice (race conditions, network retries).
         const refCode = 'VG'+Math.random().toString(36).substr(2,5).toUpperCase();
         finalUser = {name:uname||'Customer',phone:`+91${phone}`,code:refCode,walletBalance:200};
         await createOrUpdateUser(phone,{
-          name: uname||'Customer',
+          name: uname || 'Customer',
           phone: phone,
           walletBalance: 200,
           referralCode: refCode,
           totalBookings: 0,
+          signupBonusGiven: true,        // ← Bug 2: mark bonus as given
           createdAt: new Date().toISOString(),
         });
+        await logWalletTransaction(phone, 200, 'signup_bonus', 'credit');
         setUser(finalUser);
         setWallet(200);
-        // ✅ Real-time orders listener
+
         const unsub2 = firestore().collection('bookings')
           .where('customerPhone','==',phone)
           .orderBy('createdAt','desc').limit(20)
