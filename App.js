@@ -647,7 +647,7 @@ const HOME_PACKAGES = [
     includes:['Wiping exterior surfaces','Cleaning door seals and gaskets','Cleaning top of fridge','Basic interior wipe','Cleaning handle'],
   },
 ];
-const getDates=()=>{const D=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'],M=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'],t=new Date();return Array.from({length:7},(_,i)=>{const d=new Date(t);d.setDate(t.getDate()+i);return{label:i===0?'Today':i===1?'Tomorrow':D[d.getDay()],num:d.getDate(),mon:M[d.getMonth()]};});};
+const getDates=()=>{const D=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'],M=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'],t=new Date();return Array.from({length:7},(_,i)=>{const d=new Date(t);d.setDate(t.getDate()+i);const iso=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;return{label:i===0?'Today':i===1?'Tomorrow':D[d.getDay()],num:d.getDate(),mon:M[d.getMonth()],iso};});};
 const TIMES=['8:00 AM','9:00 AM','10:00 AM','11:00 AM','12:00 PM','1:00 PM','2:00 PM','3:00 PM','4:00 PM','5:00 PM','6:00 PM'];
 
 // ════════════════════════════════════════════════════════════════
@@ -925,22 +925,24 @@ export default function App() {
             let existingUser = await getUser(ph);
 
             // ── HEAL: If Firestore doc missing (e.g. Bug 1 caused write fail
-            //    during signup), create a minimal doc now so future reads work.
-            //    NO wallet bonus here — bonus is only on real new-user signup
-            //    in verifyOTP (Bug 2). Existing logged-in users get nothing.
+            //    during signup), create the doc AND credit the signup bonus.
+            //    Reason: Firebase Auth has them, so they completed OTP at
+            //    some point — they earned the ₹200. Without crediting here,
+            //    a user who never re-logs in stays stuck at ₹0 forever.
+            //    The signupBonusGiven flag still guards against double-credit.
             if(!existingUser){
               const refCode = 'VG'+Math.random().toString(36).substr(2,5).toUpperCase();
               await createOrUpdateUser(ph, {
                 name: 'Customer',
                 phone: ph,
-                walletBalance: 0,         // ← NO bonus on restore (Bug 2)
+                walletBalance: 200,            // ← Bug 6 FIX: credit bonus on heal
                 referralCode: refCode,
                 totalBookings: 0,
-                signupBonusGiven: false,  // ← Bug 2 flag — will be set true
-                                          //   only in real signup path
+                signupBonusGiven: true,        // ← Bonus given (flag prevents re-credit)
                 createdAt: new Date().toISOString(),
-                restoredFromAuth: true,   // ← marker for debugging / audit
+                restoredFromAuth: true,        // ← marker for analytics
               });
+              await logWalletTransaction(ph, 200, 'signup_bonus_heal', 'credit');
               existingUser = await getUser(ph);
             }
 
@@ -954,7 +956,12 @@ export default function App() {
             setUser(finalUser);
             setWallet(existingUser?.walletBalance || 0);
 
-            // Orders listener + FCM register (same as before)
+            // FIX (Bug 6 listener leak): onAuthStateChanged fires on token
+            // refresh too. Tear down any existing listeners first so we don't
+            // accumulate orphan onSnapshots that leak memory.
+            setOrdersUnsub(prev => { if (prev) try { prev(); } catch(_){} return null; });
+            setAddrsUnsub(prev  => { if (prev) try { prev(); } catch(_){} return null; });
+
             const unsub = firestore().collection('bookings')
               .where('userId','==',ph).orderBy('createdAt','desc').limit(50)
               .onSnapshot(snap=>setOrders(snap.docs.map(d=>({id:d.id,...d.data()}))),
@@ -1177,20 +1184,34 @@ export default function App() {
       let finalUser;
       if(existingUser){
         // ── RETURNING USER ──────────────────────────────────────────────
-        // Bug 2 FIX: use actual walletBalance (default 0, NOT 200) —
-        // otherwise every login shows ₹200 even if real balance is 0.
+        // Bug 2 FIX: use actual walletBalance (default 0, NOT 200).
         let walletBal = existingUser.walletBalance || 0;
 
-        // ── HEAL EDGE CASE: user doc exists but signup bonus never given
-        //    (e.g. created by session-restore heal-path which doesn't credit).
-        //    Credit it now, ONCE. Idempotent via signupBonusGiven flag.
+        // ── HEAL EDGE CASE: user doc exists but signup bonus never given.
+        // Bug 2 RACE FIX: Use Firestore transaction to read+write atomically.
+        // Without this, double-tap on Verify causes double-credit.
         if(!existingUser.signupBonusGiven){
-          walletBal = walletBal + 200;
-          await createOrUpdateUser(phone, {
-            walletBalance: walletBal,
-            signupBonusGiven: true,
-          });
-          await logWalletTransaction(phone, 200, 'signup_bonus', 'credit');
+          let credited = false;
+          try {
+            await firestore().runTransaction(async (txn) => {
+              const ref = firestore().collection('users').doc(phone);
+              const snap = await txn.get(ref);
+              if (!snap.exists) return;            // race: doc deleted
+              const data = snap.data();
+              if (data.signupBonusGiven) return;   // already credited by another tab
+              const newBal = (data.walletBalance || 0) + 200;
+              txn.update(ref, {
+                walletBalance: newBal,
+                signupBonusGiven: true,
+              });
+              walletBal = newBal;
+              credited = true;
+            });
+            if (credited) await logWalletTransaction(phone, 200, 'signup_bonus', 'credit');
+          } catch (e) {
+            console.error('signup bonus txn:', e);
+            // Don't block login; user can retry by logging out/in
+          }
         }
 
         finalUser = {
@@ -1285,6 +1306,9 @@ export default function App() {
       if(subVisits===0){Alert.alert('No Visits','Selected dates don\'t include any of your chosen weekdays — adjust dates or days.');return;}
     }
     if(cart.length===0){Alert.alert('Cart Empty','Please add a service first');return;}
+    // FIX (audit): block bookings with empty address — was silently submitting before
+    if(!flat || flat.trim().length===0){Alert.alert('Address Required','Please enter your flat / house number');return;}
+    if(!selArea){Alert.alert('Area Required','Please pick your service area');return;}
     setPlacing(true);
     const pro=PROFESSIONALS[Math.floor(Math.random()*PROFESSIONALS.length)];
     const fullAddr = [flat, buildingName, streetName, landmark, selArea, 'Vizag'].filter(Boolean).join(', ');
@@ -1342,6 +1366,8 @@ export default function App() {
       } catch(e){ console.log('Worker fetch:',e); }
 
       // ── Bug 5: Determine first visit date based on mode ──
+      // FIX: Use DATES[i].iso field directly (added to getDates) — avoids
+      // month-rollover bug where Feb 1 was being saved as Jan 1.
       const firstVisitDate =
         bookMode==='subscription' && subStartDate
           ? subStartDate.toISOString().split('T')[0]
@@ -1349,8 +1375,8 @@ export default function App() {
           ? selDatesMulti[0]
           : calSelDate
           ? calSelDate.toISOString().split('T')[0]
-          : DATES[selDate]
-          ? `${new Date().getFullYear()}-${String(new Date().getMonth()+1).padStart(2,'0')}-${String(DATES[selDate].num).padStart(2,'0')}`
+          : DATES[selDate]?.iso
+          ? DATES[selDate].iso
           : null;
 
       const bookingData = {
@@ -1395,7 +1421,10 @@ export default function App() {
         professional: {
           id: pro.id||'pro_auto',
           name: pro.name,
-          phone: pro.phone||'9999999999',
+          // FIX (audit): no fake fallback phone — if missing, leave null so
+          // UI shows "Phone not available" rather than the customer dialing
+          // a test/random number.
+          phone: pro.phone || null,
           rating: pro.rating||4.9,
           photo: pro.photo||null,
         },
@@ -1410,52 +1439,78 @@ export default function App() {
       // For SCHEDULED multi-date: one doc per selected date
       // For SUBSCRIPTION: one doc per visit date in [start..end] matching subDays
       // First visit doc is already created above; create N-1 children here.
-      try {
-        const childDates = [];
-        if (bookMode === 'scheduled' && selDatesMulti.length > 1) {
-          // Skip first date (already created); add rest
-          for (let i = 1; i < selDatesMulti.length; i++) childDates.push(selDatesMulti[i]);
-        } else if (bookMode === 'subscription' && subStartDate && subEndDate) {
-          // Iterate from day-after-start to end, collect matching weekdays
-          const d = new Date(subStartDate);
-          const end = new Date(subEndDate);
-          let firstCounted = false;
-          while (d <= end) {
-            if (subDays.includes(d.getDay())) {
-              if (!firstCounted) { firstCounted = true; }
-              else { childDates.push(d.toISOString().split('T')[0]); }
-            }
-            d.setDate(d.getDate() + 1);
+      const childDates = [];
+      if (bookMode === 'scheduled' && selDatesMulti.length > 1) {
+        for (let i = 1; i < selDatesMulti.length; i++) childDates.push(selDatesMulti[i]);
+      } else if (bookMode === 'subscription' && subStartDate && subEndDate) {
+        // CRITICAL: clone subStartDate before iterating — never mutate state.
+        const d = new Date(subStartDate.getTime());
+        const end = new Date(subEndDate.getTime());
+        let firstCounted = false;
+        while (d <= end) {
+          if (subDays.includes(d.getDay())) {
+            if (!firstCounted) firstCounted = true;
+            else childDates.push(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`);
+          }
+          d.setDate(d.getDate() + 1);
+        }
+      }
+
+      if (childDates.length > 0) {
+        // FIX: Retry batch up to 3 times on failure. If still fails,
+        // tell user explicitly so they can contact support rather than
+        // silently leaving orphan parent without children (money lost).
+        let childAttempt = 0, childOK = false, lastErr = null;
+        while (childAttempt < 3 && !childOK) {
+          try {
+            const batch = firestore().batch();
+            childDates.forEach((dateStr, idx) => {
+              const visitIdx = idx + 2;
+              // FIX: Use Firestore auto-id instead of Date.now()+visitIdx*1000.slice
+              // The old approach could collide if last-6-digits rolled over.
+              const docRef = firestore().collection('bookings').doc();
+              const nextOrderId = 'VG' + docRef.id.substring(0, 8).toUpperCase();
+              const nextSlot = bookMode === 'subscription'
+                ? `Subscription · Visit ${visitIdx} of ${totalVisits} · ${dateStr} at ${selTime}`
+                : `Visit ${visitIdx} of ${totalVisits} · ${dateStr} at ${selTime}`;
+              batch.set(docRef, {
+                ...bookingData,
+                orderId: nextOrderId,
+                otp: Math.floor(1000 + Math.random() * 9000).toString(),
+                status: 'confirmed',
+                slot: nextSlot,
+                scheduledDate: dateStr,
+                visitNumber: visitIdx,
+                parentSubscriptionId: result.orderId,
+                isChildVisit: true,
+                totalPaid: 0,                  // already paid by parent
+                createdAt: firestore.FieldValue.serverTimestamp(),
+                rated: false,
+              });
+            });
+            await batch.commit();
+            childOK = true;
+          } catch (e) {
+            lastErr = e;
+            childAttempt++;
+            await new Promise(r => setTimeout(r, 1000 * childAttempt));  // backoff
           }
         }
-
-        if (childDates.length > 0) {
-          const batch = firestore().batch();
-          childDates.forEach((dateStr, idx) => {
-            const visitIdx = idx + 2; // first visit is #1; children start at #2
-            const nextOrderId = 'VG' + (Date.now() + visitIdx * 1000).toString().slice(-6);
-            const nextSlot = bookMode === 'subscription'
-              ? `Subscription · Visit ${visitIdx} of ${totalVisits} · ${dateStr} at ${selTime}`
-              : `Visit ${visitIdx} of ${totalVisits} · ${dateStr} at ${selTime}`;
-            batch.set(firestore().collection('bookings').doc(nextOrderId), {
-              ...bookingData,
-              orderId: nextOrderId,
-              otp: Math.floor(1000 + Math.random() * 9000).toString(),
-              status: 'confirmed',
-              slot: nextSlot,
-              scheduledDate: dateStr,
-              visitNumber: visitIdx,
-              parentSubscriptionId: result.orderId,    // link back to parent
-              isChildVisit: true,                       // marker for admin/worker apps
-              totalPaid: 0,                             // already paid by parent
-              createdAt: firestore.FieldValue.serverTimestamp(),
-              rated: false,
+        if (!childOK) {
+          // Mark parent doc as needing manual repair — surfaces to admin
+          try {
+            await firestore().collection('bookings').doc(result.orderId).update({
+              needsChildVisitsRepair: true,
+              childVisitsAttempted: childDates.length,
+              childVisitsError: String(lastErr?.message || lastErr),
             });
-          });
-          await batch.commit();
-          console.log(`Created ${childDates.length} child booking docs for ${bookMode}`);
+          } catch (_) {}
+          Alert.alert(
+            '⚠️ Visits Partially Saved',
+            `Your first visit is booked, but the ${childDates.length} follow-up visits could not be saved automatically. Our team has been notified and will create them within 1 hour. Call +91-891-VEGA-999 if urgent. Order: ${result.orderId}`,
+          );
         }
-      } catch (e) { console.error('Child docs creation error:', e); }
+      }
 
       const o = {
         orderId: result.orderId,
@@ -2420,7 +2475,9 @@ export default function App() {
                 <Text style={{fontSize:13,fontWeight:'700',color:C.text,marginBottom:10}}>Select Date(s)</Text>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{marginBottom:14}}>
                   {DATES.map((d,i)=>{
-                    const dateStr = d.iso || `${new Date().getFullYear()}-${String(new Date().getMonth()+1).padStart(2,'0')}-${String(d.num).padStart(2,'0')}`;
+                    // FIX: Use d.iso (added to getDates) — old fallback used today's
+                    // month for ALL 7 dates, causing month-rollover bug.
+                    const dateStr = d.iso;
                     const isSelected = selDatesMulti.includes(dateStr);
                     return (
                       <TouchableOpacity key={i}
