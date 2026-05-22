@@ -891,6 +891,15 @@ export default function App() {
   const [addrLabel,     setAddrLabel]     = useState('Home'); // label for save modal
   const [editingAddrId, setEditingAddrId] = useState(null);  // for edit mode
 
+  // ── Bug 4: Multi-date scheduling state ──────────────────────────
+  // Array of YYYY-MM-DD strings — when scheduled mode, customer picks multiple dates
+  const [selDatesMulti, setSelDatesMulti] = useState([]);
+
+  // ── Bug 5: Monthly Subscription state ───────────────────────────
+  const [subStartDate, setSubStartDate] = useState(null);      // Date object
+  const [subEndDate,   setSubEndDate]   = useState(null);      // Date object
+  const [subDays,      setSubDays]      = useState([1, 3, 5]); // 0=Sun..6=Sat; default Mon/Wed/Fri
+
   const fadeA  = useRef(new Animated.Value(0)).current;
   const trackMapRef = useRef(null); // WebView ref for live map
   const scaleA = useRef(new Animated.Value(0.85)).current;
@@ -1022,14 +1031,44 @@ export default function App() {
   const totalPrice  = unitPrice + addonTotal;
   const cartTotal   = cart.reduce((s,i)=>s+i.price,0);
   const cartCount   = cart.length;
-  // ── Change 3: Recurring multiplier — charge all visits upfront ────────
-  const recurMonths    = recurDuration==='6months'?6:recurDuration==='3months'?3:1;
-  const visitsPerMonth = recurFreq==='Monthly'?1:recurFreq==='Biweekly'?2:4;
-  const recurVisits    = bookMode==='recurring' ? recurMonths * visitsPerMonth : 1;
-  const recurBase      = bookMode==='recurring' ? cartTotal * recurVisits : cartTotal;
+  // ── Bug 4 & 5: Calculate visits + total based on booking mode ─────────
+  // Bug 5: Subscription — count days in [start..end] that match subDays (weekdays)
+  const calcSubVisits = () => {
+    if (!subStartDate || !subEndDate || subDays.length === 0) return 0;
+    let count = 0;
+    const d = new Date(subStartDate);
+    const end = new Date(subEndDate);
+    while (d <= end) {
+      if (subDays.includes(d.getDay())) count++;
+      d.setDate(d.getDate() + 1);
+    }
+    return count;
+  };
+  const subVisits = bookMode === 'subscription' ? calcSubVisits() : 0;
+
+  // Bug 4: Scheduled multi-date — N visits = N selected dates
+  const schedVisits = bookMode === 'scheduled' ? Math.max(1, selDatesMulti.length) : 0;
+
+  // Number of visits this booking covers (1 for instant, N for scheduled/subscription)
+  const totalVisits =
+    bookMode === 'subscription' ? Math.max(1, subVisits) :
+    bookMode === 'scheduled'    ? Math.max(1, schedVisits) :
+    1;
+
+  // Base = cart × visits
+  const baseBeforeDisc = cartTotal * totalVisits;
+
+  // Bug 5: 10% subscription discount on subscription bookings
+  const subscriptionDiscount = bookMode === 'subscription' && subVisits > 0
+    ? Math.round(baseBeforeDisc * 0.10) : 0;
+
+  const recurBase = baseBeforeDisc - subscriptionDiscount;
   const promoSave   = appliedPromo?appliedPromo.type==='pct'?Math.round(recurBase*appliedPromo.val/100):appliedPromo.val:0;
   const walletSave  = useWallet?Math.min(wallet,recurBase-promoSave):0;
   const finalTotal  = Math.max(0,recurBase-promoSave-walletSave)+29;
+
+  // Legacy aliases for older code references
+  const recurVisits = totalVisits;
 
   const toggleAddon = (id)=>setSelAddons(p=>p.includes(id)?p.filter(x=>x!==id):[...p,id]);
 
@@ -1234,24 +1273,37 @@ export default function App() {
 
   const placeOrder = async()=>{
     if(!user){Alert.alert('Login Required','',[ {text:'Login',onPress:()=>setScreen('login')} ]);return;}
-    // flat optional for testing
-    if((bookMode==='scheduled'||bookMode==='recurring')&&!selTime){Alert.alert('Time Required','Please select a time slot for your booking');return;}
+    // Validate per mode
+    if(bookMode==='scheduled'){
+      if(!selTime){Alert.alert('Time Required','Please select a time slot');return;}
+      if(selDatesMulti.length===0){Alert.alert('Date Required','Please select at least one date');return;}
+    }
+    if(bookMode==='subscription'){
+      if(!subStartDate || !subEndDate){Alert.alert('Date Range Required','Please select start and end dates');return;}
+      if(subDays.length===0){Alert.alert('Days Required','Please pick at least one day of the week');return;}
+      if(!selTime){Alert.alert('Time Required','Please select a time slot');return;}
+      if(subVisits===0){Alert.alert('No Visits','Selected dates don\'t include any of your chosen weekdays — adjust dates or days.');return;}
+    }
     if(cart.length===0){Alert.alert('Cart Empty','Please add a service first');return;}
     setPlacing(true);
     const pro=PROFESSIONALS[Math.floor(Math.random()*PROFESSIONALS.length)];
     const fullAddr = [flat, buildingName, streetName, landmark, selArea, 'Vizag'].filter(Boolean).join(', ');
-    // ── Change 4: use calSelDate (full calendar) with fallback to old DATES array
     const _fmtDate = calSelDate
       ? calSelDate.toLocaleDateString('en-IN',{weekday:'short',day:'numeric',month:'short'})
       : DATES[selDate] ? `${DATES[selDate].label} ${DATES[selDate].num} ${DATES[selDate].mon}` : 'TBD';
     let slot;
     if(bookMode==='instant'){slot='Arriving in 30–45 minutes';}
-    else if(bookMode==='recurring'){slot=`Every ${recurFreq||'Weekly'} · ${recurDuration} · ${recurVisits} visits · Starts ${_fmtDate} at ${selTime}`;}
+    else if(bookMode==='subscription'){slot=`Subscription · ${subVisits} visits · ${subStartDate.toLocaleDateString('en-IN',{day:'numeric',month:'short'})} → ${subEndDate.toLocaleDateString('en-IN',{day:'numeric',month:'short'})} at ${selTime}`;}
+    else if(bookMode==='scheduled' && selDatesMulti.length > 1){slot=`${selDatesMulti.length} visits · ${selDatesMulti[0]} → ${selDatesMulti[selDatesMulti.length-1]} at ${selTime}`;}
+    else if(bookMode==='scheduled'){slot=`${selDatesMulti[0] || _fmtDate} at ${selTime}`;}
     else{slot=`${_fmtDate} at ${selTime}`;}
 
     const resetForm = ()=>{
       setCart([]);setAppliedPromo(null);setUseWallet(false);setPromoCode('');
       setFlat('');setBuildingName('');setStreetName('');setLandmark('');setSelTime(null);setSelAddons([]);setSelPayMethod('upi');
+      setSelDatesMulti([]);      // Bug 4 reset
+      setSubStartDate(null);     // Bug 5 reset
+      setSubEndDate(null);
       setPlacing(false);
     };
 
@@ -1260,7 +1312,7 @@ export default function App() {
       setTimeout(()=>{
         const otp=Math.floor(1000+Math.random()*9000).toString();
         const oid='VG'+Date.now().toString().slice(-6);
-        const o={orderId:oid,otp,items:[...cart],total:finalTotal,slot,addr:fullAddr,status:'confirmed',time:new Date().toLocaleString('en-IN'),professional:pro,rated:false,bookingMode:bookMode,recurFreq:bookMode==='recurring'?(recurFreq||'Weekly'):null};
+        const o={orderId:oid,otp,items:[...cart],total:finalTotal,slot,addr:fullAddr,status:'confirmed',time:new Date().toLocaleString('en-IN'),professional:pro,rated:false,bookingMode:bookMode,totalVisits};
         setOrders(p=>[o,...p]);
         if(useWallet&&walletSave>0) setWallet(w=>w-walletSave);
         resetForm();
@@ -1289,13 +1341,23 @@ export default function App() {
         }
       } catch(e){ console.log('Worker fetch:',e); }
 
+      // ── Bug 5: Determine first visit date based on mode ──
+      const firstVisitDate =
+        bookMode==='subscription' && subStartDate
+          ? subStartDate.toISOString().split('T')[0]
+          : bookMode==='scheduled' && selDatesMulti.length > 0
+          ? selDatesMulti[0]
+          : calSelDate
+          ? calSelDate.toISOString().split('T')[0]
+          : DATES[selDate]
+          ? `${new Date().getFullYear()}-${String(new Date().getMonth()+1).padStart(2,'0')}-${String(DATES[selDate].num).padStart(2,'0')}`
+          : null;
+
       const bookingData = {
         userId: phone,
-        customerPhone: phone,          // ← for Firestore .where() query
+        customerPhone: phone,
         userName: user.name,
         userPhone: phone,
-        // ← NOT setting assignedWorkerId here — Hub Manager / Admin must assign
-        // professional object is only for customer-facing display
         assignedWorkerId: null,
         assignedWorkerName: null,
         assignedWorkerPhone: null,
@@ -1305,18 +1367,25 @@ export default function App() {
         promoCode: appliedPromo?.code||null,
         promoDiscount: promoSave||0,
         walletUsed: walletSave||0,
+        subscriptionDiscount: subscriptionDiscount || 0,    // Bug 5: 10% off if subscription
         platformFee: 29,
         slot,
-        bookingMode: bookMode,
-        recurFreq:     bookMode==='recurring'?(recurFreq||'Weekly'):null,
-        recurDuration: bookMode==='recurring'?recurDuration:null,
-        recurVisits:   bookMode==='recurring'?recurVisits:null,
-        // ← scheduledDate: prefer calSelDate (calendar), fall back to old DATES picker
-        scheduledDate: (bookMode==='scheduled'||bookMode==='recurring')
-          ? (calSelDate ? calSelDate.toISOString().split('T')[0]
-             : DATES[selDate] ? `${new Date().getFullYear()}-${String(new Date().getMonth()+1).padStart(2,'0')}-${String(DATES[selDate].num).padStart(2,'0')}`
-             : null)
-          : null,
+        bookingMode: bookMode,                              // 'instant' | 'scheduled' | 'subscription'
+        // Bug 5: Subscription fields
+        subscriptionStartDate: bookMode==='subscription' && subStartDate ? subStartDate.toISOString().split('T')[0] : null,
+        subscriptionEndDate:   bookMode==='subscription' && subEndDate   ? subEndDate.toISOString().split('T')[0]   : null,
+        subscriptionDays:      bookMode==='subscription' ? subDays.map(d=>['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d]) : null,
+        // Bug 4 + 5: Visit tracking
+        totalVisits:           totalVisits || 1,
+        visitNumber:           1,                           // this is the first visit doc
+        parentSubscriptionId:  null,                        // set when creating child docs below
+        totalPaid:             finalTotal,
+        paymentStatus:         selPayMethod==='cash' ? 'pending' : 'paid',
+        // Legacy fields kept for backward compat with admin/worker apps
+        recurFreq:     null,
+        recurDuration: null,
+        recurVisits:   bookMode==='subscription' ? subVisits : (bookMode==='scheduled' ? selDatesMulti.length : null),
+        scheduledDate: bookMode!=='instant' ? firstVisitDate : null,
         scheduledTime: selTime||null,
         address: {
           flat, buildingName, streetName, landmark,
@@ -1337,31 +1406,56 @@ export default function App() {
       const result = await createBooking(bookingData);
       if(!result.success)throw new Error(result.error||'Failed to create booking');
 
-      // ── Change 3: Create recurring child docs AFTER payment success ──────────
-      if(bookMode==='recurring' && bookingData.recurFreq && bookingData.scheduledDate){
-        try{
-          const freqDays = {'Weekly':7,'Biweekly':14,'Monthly':30};
-          const days = freqDays[bookingData.recurFreq]||7;
-          const totalV = recurVisits||4;
-          const baseDate = new Date(bookingData.scheduledDate);
-          const batch = firestore().batch();
-          for(let i=1;i<totalV;i++){
-            const nextDate = new Date(baseDate);
-            nextDate.setDate(baseDate.getDate()+(days*i));
-            const nextOrderId='VG'+(Date.now()+i*1000).toString().slice(-6);
-            const nextSlot=`Every ${bookingData.recurFreq} · Visit ${i+1} of ${totalV} · ${nextDate.toLocaleDateString('en-IN',{weekday:'short',day:'numeric',month:'short'})} at ${bookingData.scheduledTime}`;
-            batch.set(firestore().collection('bookings').doc(nextOrderId),{
-              ...bookingData, orderId:nextOrderId,
-              otp:Math.floor(1000+Math.random()*9000).toString(),
-              status:'confirmed', slot:nextSlot,
-              scheduledDate:nextDate.toISOString().split('T')[0],
-              parentOrderId:result.orderId, isRecurringChild:true, recurIndex:i,
-              createdAt:firestore.FieldValue.serverTimestamp(), rated:false,
-            });
+      // ── Bug 4 + 5: Create child booking docs AFTER payment success ──────────
+      // For SCHEDULED multi-date: one doc per selected date
+      // For SUBSCRIPTION: one doc per visit date in [start..end] matching subDays
+      // First visit doc is already created above; create N-1 children here.
+      try {
+        const childDates = [];
+        if (bookMode === 'scheduled' && selDatesMulti.length > 1) {
+          // Skip first date (already created); add rest
+          for (let i = 1; i < selDatesMulti.length; i++) childDates.push(selDatesMulti[i]);
+        } else if (bookMode === 'subscription' && subStartDate && subEndDate) {
+          // Iterate from day-after-start to end, collect matching weekdays
+          const d = new Date(subStartDate);
+          const end = new Date(subEndDate);
+          let firstCounted = false;
+          while (d <= end) {
+            if (subDays.includes(d.getDay())) {
+              if (!firstCounted) { firstCounted = true; }
+              else { childDates.push(d.toISOString().split('T')[0]); }
+            }
+            d.setDate(d.getDate() + 1);
           }
+        }
+
+        if (childDates.length > 0) {
+          const batch = firestore().batch();
+          childDates.forEach((dateStr, idx) => {
+            const visitIdx = idx + 2; // first visit is #1; children start at #2
+            const nextOrderId = 'VG' + (Date.now() + visitIdx * 1000).toString().slice(-6);
+            const nextSlot = bookMode === 'subscription'
+              ? `Subscription · Visit ${visitIdx} of ${totalVisits} · ${dateStr} at ${selTime}`
+              : `Visit ${visitIdx} of ${totalVisits} · ${dateStr} at ${selTime}`;
+            batch.set(firestore().collection('bookings').doc(nextOrderId), {
+              ...bookingData,
+              orderId: nextOrderId,
+              otp: Math.floor(1000 + Math.random() * 9000).toString(),
+              status: 'confirmed',
+              slot: nextSlot,
+              scheduledDate: dateStr,
+              visitNumber: visitIdx,
+              parentSubscriptionId: result.orderId,    // link back to parent
+              isChildVisit: true,                       // marker for admin/worker apps
+              totalPaid: 0,                             // already paid by parent
+              createdAt: firestore.FieldValue.serverTimestamp(),
+              rated: false,
+            });
+          });
           await batch.commit();
-        }catch(e){console.error('Recurring child docs error:',e);}
-      }
+          console.log(`Created ${childDates.length} child booking docs for ${bookMode}`);
+        }
+      } catch (e) { console.error('Child docs creation error:', e); }
 
       const o = {
         orderId: result.orderId,
@@ -1374,7 +1468,7 @@ export default function App() {
         professional: pro,
         rated: false,
         bookingMode: bookMode,
-        recurFreq: bookMode==='recurring'?(recurFreq||'Weekly'):null,
+        totalVisits,
       };
 
       setOrders(p=>[o,...p]);
@@ -1967,7 +2061,7 @@ export default function App() {
         <ScrollView style={{flex:1,padding:16}}>
           <Text style={{fontSize:15,fontWeight:'700',color:C.text,marginBottom:12}}>When do you need this?</Text>
           <View style={{flexDirection:'row',backgroundColor:C.card,borderRadius:16,padding:4,borderWidth:0.5,borderColor:C.border2,marginBottom:20,...SHADOW.card}}>
-            {[{id:'instant',label:'⚡ Instant'},{id:'scheduled',label:'📅 Schedule'},{id:'recurring',label:'🔄 Recurring'}].map(m=>(
+            {[{id:'instant',label:'⚡ Now'},{id:'scheduled',label:'📅 Schedule'},{id:'subscription',label:'🔁 Monthly'}].map(m=>(
               <TouchableOpacity key={m.id} style={{flex:1,paddingVertical:12,borderRadius:12,alignItems:'center',backgroundColor:bookMode===m.id?C.orange:'transparent',...(bookMode===m.id?SHADOW.glow:{})}} onPress={()=>setBookMode(m.id)}>
                 <Text style={{fontSize:12,fontWeight:'700',color:bookMode===m.id?'#FFF':C.muted}}>{m.label}</Text>
               </TouchableOpacity>
@@ -1980,39 +2074,17 @@ export default function App() {
               <Text style={{color:C.green,fontSize:13,textAlign:'center',lineHeight:20}}>Professional arrives at your door in 30–45 minutes</Text>
             </Card>
           )}
-          {bookMode==='recurring'&&(
-            <Card style={{backgroundColor:C.goldSolid,borderColor:C.goldBd,marginBottom:20}}>
-              <DText style={{fontWeight:'700',color:C.gold,fontSize:16,marginBottom:4}}>🔄 Recurring Plan — Save 25%</DText>
-              <Text style={{color:C.muted,fontSize:12,lineHeight:18,marginBottom:12}}>Scheduled automatically. Charged upfront. Cancel anytime.</Text>
-              {/* Frequency */}
-              <Text style={{fontSize:12,fontWeight:'700',color:C.gold,marginBottom:6}}>How often?</Text>
-              <View style={{flexDirection:'row',gap:8,marginBottom:14}}>
-                {['Weekly','Biweekly','Monthly'].map((opt)=>(
-                  <TouchableOpacity key={opt} onPress={()=>setRecurFreq(opt)}
-                    style={{flex:1,paddingVertical:9,borderRadius:20,alignItems:'center',backgroundColor:recurFreq===opt?C.gold:C.white,borderWidth:0.5,borderColor:C.goldBd}}>
-                    <Text style={{color:recurFreq===opt?'#FFF':C.gold,fontSize:12,fontWeight:'700'}}>{opt}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-              {/* Duration — Change 3 */}
-              <Text style={{fontSize:12,fontWeight:'700',color:C.gold,marginBottom:6}}>Plan duration?</Text>
-              <View style={{flexDirection:'row',gap:8,marginBottom:10}}>
-                {[['1month','1 Month'],['3months','3 Months'],['6months','6 Months']].map(([val,label])=>(
-                  <TouchableOpacity key={val} onPress={()=>setRecurDuration(val)}
-                    style={{flex:1,paddingVertical:9,borderRadius:20,alignItems:'center',backgroundColor:recurDuration===val?C.gold:C.white,borderWidth:0.5,borderColor:C.goldBd}}>
-                    <Text style={{color:recurDuration===val?'#FFF':C.gold,fontSize:11,fontWeight:'700'}}>{label}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-              <View style={{backgroundColor:'rgba(154,107,16,0.12)',borderRadius:12,padding:10,flexDirection:'row',alignItems:'center',gap:8}}>
-                <Text style={{fontSize:14}}>🗓️</Text>
-                <Text style={{color:C.gold,fontWeight:'700',fontSize:12,flex:1}}>
-                  {recurVisits} total visits · ₹{cartTotal>0?cartTotal*recurVisits:totalPrice*recurVisits} charged upfront
-                </Text>
+          {bookMode==='subscription'&&(
+            <Card style={{backgroundColor:C.tealBg,borderColor:C.tealBd,marginBottom:20}}>
+              <DText style={{fontWeight:'700',color:C.teal,fontSize:16,marginBottom:4}}>🔁 Monthly Subscription — Save 10%</DText>
+              <Text style={{color:C.muted,fontSize:12,lineHeight:18,marginBottom:8}}>Pick your start + end dates, days of week, and time on the next step. Single upfront payment for all visits.</Text>
+              <View style={{backgroundColor:'rgba(14,88,72,0.12)',borderRadius:10,padding:10,flexDirection:'row',alignItems:'center',gap:8}}>
+                <Text style={{fontSize:14}}>👉</Text>
+                <Text style={{color:C.teal,fontWeight:'700',fontSize:12,flex:1}}>Tap "Address →" below to configure your subscription</Text>
               </View>
             </Card>
           )}
-          {(bookMode==='scheduled'||bookMode==='recurring')&&(
+          {bookMode==='scheduled'&&(
             <>
               <View style={{backgroundColor:C.orangeBg,borderRadius:12,padding:12,marginBottom:16,borderWidth:0.5,borderColor:C.orangeBd,flexDirection:'row',alignItems:'center',gap:10}}>
                 <Text style={{fontSize:18}}>👇</Text>
@@ -2105,9 +2177,10 @@ export default function App() {
                 {selAddons.map(id=>{const a=selSvc.addons?.find(x=>x.id===id);return a?<BR key={id} l={a.name} r={`₹${a.price}`}/>:null;})}
               </>
             )}
-            {bookMode==='recurring'&&<BR l={`× ${recurVisits} visits (${recurDuration})`} r={`₹${(cartTotal>0?cartTotal:totalPrice)*recurVisits}`} rc={C.gold}/>}
+            {bookMode==='subscription' && subVisits > 0 && <BR l={`× ${subVisits} visits (subscription)`} r={`₹${cartTotal*subVisits}`} rc={C.teal}/>}
+            {bookMode==='subscription' && subscriptionDiscount > 0 && <BR l="Subscription discount (10%)" r={`–₹${subscriptionDiscount}`} rc={C.green}/>}
             <View style={{height:1,backgroundColor:C.border,marginVertical:8}}/>
-            <BR l="Total before checkout" r={`₹${bookMode==='recurring'?(cartTotal>0?cartTotal:totalPrice)*recurVisits:(cartTotal>0?cartTotal:totalPrice)}`} bold/>
+            <BR l="Total before checkout" r={`₹${recurBase}`} bold/>
           </Card>
           <View style={{height:100}}/>
         </ScrollView>
@@ -2119,15 +2192,16 @@ export default function App() {
                   calSelDate?`${calSelDate.toLocaleDateString('en-IN',{day:'numeric',month:'short'})} at ${selTime}`:'Select date'
                 ):'Select time'}
               </Text>
-              {bookMode==='recurring'&&<Text style={{fontSize:9,color:C.gold,fontWeight:'700'}}>{recurVisits} visits upfront</Text>}
+              {bookMode==='subscription' && subVisits>0 && <Text style={{fontSize:9,color:C.teal,fontWeight:'700'}}>{subVisits} visits upfront</Text>}
+              {bookMode==='scheduled' && selDatesMulti.length>0 && <Text style={{fontSize:9,color:C.orange,fontWeight:'700'}}>{selDatesMulti.length} visit{selDatesMulti.length>1?'s':''}</Text>}
               <DText style={{fontSize:24,fontWeight:'700',color:C.orange}}>
-                ₹{bookMode==='recurring'?(cartTotal>0?cartTotal:totalPrice)*recurVisits:(cartTotal>0?cartTotal:totalPrice)}
+                ₹{recurBase>0?recurBase:(cartTotal>0?cartTotal:totalPrice)}
               </DText>
             </View>
             <TouchableOpacity
               style={[S.ctaBtn,{backgroundColor:selSvc.gradient[0],...SHADOW.glow,shadowColor:selSvc.gradient[1]},
-                ((bookMode==='scheduled'||bookMode==='recurring')&&(!selTime||!calSelDate))&&{opacity:0.4}]}
-              disabled={(bookMode==='scheduled'||bookMode==='recurring')&&(!selTime||!calSelDate)}
+                (bookMode==='scheduled' && (!selTime||!calSelDate)) && {opacity:0.4}]}
+              disabled={bookMode==='scheduled' && (!selTime||!calSelDate)}
               onPress={()=>{
                 const item=buildCartItem();
                 if(item){setCart(prev=>{const f=prev.filter(i=>i.svcId!==selSvc.id);return [...f,item];});}
@@ -2312,47 +2386,66 @@ export default function App() {
               {useWallet&&<Text style={{color:'#FFF',fontSize:14,fontWeight:'800'}}>✓</Text>}
             </View>
           </TouchableOpacity>
-          {/* ✅ BOOKING MODE — always visible on step4 so user can switch anytime */}
+          {/* ✅ BOOKING MODE — 3 modes: Now / Schedule (multi-date) / Subscription (Bug 4 + 5) */}
           <Card style={{marginBottom:12}}>
             <Text style={{fontWeight:'700',color:C.text,fontSize:14,marginBottom:12}}>⏰ When do you need this?</Text>
             <View style={{flexDirection:'row',backgroundColor:C.bg,borderRadius:14,padding:3,marginBottom:12}}>
-              {[{id:'instant',label:'⚡ Now'},{id:'scheduled',label:'📅 Later'},{id:'recurring',label:'🔄 Repeat'}].map(m=>(
-                <TouchableOpacity key={m.id} style={{flex:1,paddingVertical:10,borderRadius:11,alignItems:'center',backgroundColor:bookMode===m.id?C.orange:'transparent',...(bookMode===m.id?SHADOW.glow:{})}} onPress={()=>{setBookMode(m.id);setSelTime(null);}}>
-                  <Text style={{fontSize:11,fontWeight:'700',color:bookMode===m.id?'#FFF':C.muted}}>{m.label}</Text>
+              {[
+                {id:'instant',     label:'⚡ Book Now'},
+                {id:'scheduled',   label:'📅 Schedule'},
+                {id:'subscription',label:'🔁 Monthly'},
+              ].map(m=>(
+                <TouchableOpacity key={m.id}
+                  style={{flex:1,paddingVertical:10,borderRadius:11,alignItems:'center',backgroundColor:bookMode===m.id?C.orange:'transparent',...(bookMode===m.id?SHADOW.glow:{})}}
+                  onPress={()=>{setBookMode(m.id);setSelTime(null);setSelDatesMulti([]);}}>
+                  <Text style={{fontSize:10,fontWeight:'700',color:bookMode===m.id?'#FFF':C.muted}}>{m.label}</Text>
                 </TouchableOpacity>
               ))}
             </View>
+
+            {/* ── INSTANT ─────────────────────────────────────────── */}
             {bookMode==='instant'&&(
               <View style={{backgroundColor:C.greenBg,borderRadius:12,padding:10,flexDirection:'row',alignItems:'center',gap:8,borderWidth:0.5,borderColor:C.greenBd}}>
                 <Text style={{fontSize:16}}>⚡</Text>
                 <Text style={{color:C.green,fontWeight:'600',fontSize:12}}>Professional arrives in 30–45 minutes</Text>
               </View>
             )}
-            {bookMode==='recurring'&&(
-              <View style={{marginBottom:10}}>
-                <Text style={{fontSize:12,fontWeight:'600',color:C.muted,marginBottom:8}}>Repeat frequency:</Text>
-                <View style={{flexDirection:'row',gap:8}}>
-                  {['Weekly','Biweekly','Monthly'].map((opt)=>(
-                    <TouchableOpacity key={opt} onPress={()=>setRecurFreq(opt)}
-                      style={{paddingHorizontal:14,paddingVertical:7,borderRadius:20,backgroundColor:recurFreq===opt?C.gold:C.card,borderWidth:0.5,borderColor:C.goldBd}}>
-                      <Text style={{color:recurFreq===opt?'#FFF':C.gold,fontSize:12,fontWeight:'700'}}>{opt}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              </View>
-            )}
-            {(bookMode==='scheduled'||bookMode==='recurring')&&(
+
+            {/* ── SCHEDULED — Bug 4: Multi-date selection ─────────── */}
+            {bookMode==='scheduled'&&(
               <>
-                <Text style={{fontSize:13,fontWeight:'700',color:C.text,marginBottom:10,marginTop:4}}>Select Date</Text>
+                <View style={{backgroundColor:C.orangeBg,borderRadius:10,padding:8,marginBottom:10,borderWidth:0.5,borderColor:C.orangeBd}}>
+                  <Text style={{color:C.orange,fontSize:11,fontWeight:'600'}}>📅 Tap multiple dates to schedule recurring visits — single payment for all.</Text>
+                </View>
+                <Text style={{fontSize:13,fontWeight:'700',color:C.text,marginBottom:10}}>Select Date(s)</Text>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{marginBottom:14}}>
-                  {DATES.map((d,i)=>(
-                    <TouchableOpacity key={i} style={{marginRight:8,width:62,paddingVertical:12,borderRadius:16,alignItems:'center',backgroundColor:selDate===i?C.orange:C.card,borderWidth:0.5,borderColor:selDate===i?C.orange:C.border2,...(selDate===i?SHADOW.glow:{})}} onPress={()=>setSelDate(i)}>
-                      <Text style={{fontSize:9,color:selDate===i?'rgba(255,255,255,0.8)':C.muted,fontWeight:'600'}}>{d.label}</Text>
-                      <DText style={{fontSize:20,fontWeight:'700',color:selDate===i?'#FFF':C.text,marginTop:2}}>{d.num}</DText>
-                      <Text style={{fontSize:9,color:selDate===i?'rgba(255,255,255,0.7)':C.muted}}>{d.mon}</Text>
-                    </TouchableOpacity>
-                  ))}
+                  {DATES.map((d,i)=>{
+                    const dateStr = d.iso || `${new Date().getFullYear()}-${String(new Date().getMonth()+1).padStart(2,'0')}-${String(d.num).padStart(2,'0')}`;
+                    const isSelected = selDatesMulti.includes(dateStr);
+                    return (
+                      <TouchableOpacity key={i}
+                        style={{marginRight:8,width:62,paddingVertical:12,borderRadius:16,alignItems:'center',backgroundColor:isSelected?C.orange:C.card,borderWidth:isSelected?2:0.5,borderColor:isSelected?C.orange:C.border2,...(isSelected?SHADOW.glow:{})}}
+                        onPress={()=>{
+                          setSelDatesMulti(prev =>
+                            prev.includes(dateStr)
+                              ? prev.filter(x => x !== dateStr)
+                              : [...prev, dateStr].sort()
+                          );
+                        }}>
+                        <Text style={{fontSize:9,color:isSelected?'rgba(255,255,255,0.8)':C.muted,fontWeight:'600'}}>{d.label}</Text>
+                        <DText style={{fontSize:20,fontWeight:'700',color:isSelected?'#FFF':C.text,marginTop:2}}>{d.num}</DText>
+                        <Text style={{fontSize:9,color:isSelected?'rgba(255,255,255,0.7)':C.muted}}>{d.mon}</Text>
+                        {isSelected && <Text style={{color:'#FFF',fontSize:10,marginTop:2}}>✓</Text>}
+                      </TouchableOpacity>
+                    );
+                  })}
                 </ScrollView>
+                {selDatesMulti.length > 0 && (
+                  <View style={{backgroundColor:C.greenBg,borderRadius:10,padding:10,marginBottom:10,borderWidth:0.5,borderColor:C.greenBd}}>
+                    <Text style={{color:C.green,fontSize:12,fontWeight:'700'}}>✅ {selDatesMulti.length} visit{selDatesMulti.length>1?'s':''} selected</Text>
+                    <Text style={{color:C.green,fontSize:10,marginTop:2}}>Total: ₹{cartTotal} × {selDatesMulti.length} = ₹{cartTotal * selDatesMulti.length}</Text>
+                  </View>
+                )}
                 <Text style={{fontSize:13,fontWeight:'700',color:C.text,marginBottom:10}}>Select Time</Text>
                 <View style={{flexDirection:'row',flexWrap:'wrap',gap:8}}>
                   {TIMES.map((t,i)=>(
@@ -2361,7 +2454,101 @@ export default function App() {
                     </TouchableOpacity>
                   ))}
                 </View>
-                {!selTime&&<Text style={{color:C.red,fontSize:11,marginTop:8}}>⚠️ Please select a time to continue</Text>}
+                {!selTime&&<Text style={{color:C.red,fontSize:11,marginTop:8}}>⚠️ Please select a time</Text>}
+                {selDatesMulti.length===0&&<Text style={{color:C.red,fontSize:11,marginTop:4}}>⚠️ Please select at least 1 date</Text>}
+              </>
+            )}
+
+            {/* ── SUBSCRIPTION — Bug 5: Monthly with start/end + days/week ── */}
+            {bookMode==='subscription'&&(
+              <>
+                <View style={{backgroundColor:C.tealBg,borderRadius:10,padding:8,marginBottom:12,borderWidth:0.5,borderColor:C.tealBd}}>
+                  <Text style={{color:C.teal,fontSize:11,fontWeight:'600'}}>🔁 Pick start + end date, choose days of week. 10% discount on subscription. Single upfront payment.</Text>
+                </View>
+
+                {/* Start Date — quick picker (next 30 days) */}
+                <Text style={{fontSize:12,fontWeight:'700',color:C.text,marginBottom:6}}>Start Date</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{marginBottom:14}}>
+                  {Array.from({length:30}).map((_,i)=>{
+                    const d = new Date();
+                    d.setDate(d.getDate() + i);
+                    const isSelected = subStartDate && subStartDate.toDateString() === d.toDateString();
+                    return (
+                      <TouchableOpacity key={i}
+                        style={{marginRight:6,width:54,paddingVertical:10,borderRadius:14,alignItems:'center',backgroundColor:isSelected?C.teal:C.card,borderWidth:isSelected?2:0.5,borderColor:isSelected?C.teal:C.border2}}
+                        onPress={()=>setSubStartDate(d)}>
+                        <Text style={{fontSize:9,color:isSelected?'rgba(255,255,255,0.85)':C.muted,fontWeight:'600'}}>{['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d.getDay()]}</Text>
+                        <DText style={{fontSize:17,fontWeight:'700',color:isSelected?'#FFF':C.text,marginTop:1}}>{d.getDate()}</DText>
+                        <Text style={{fontSize:8,color:isSelected?'rgba(255,255,255,0.7)':C.muted}}>{['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()]}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </ScrollView>
+
+                {/* End Date — needs start date first */}
+                {subStartDate && (
+                  <>
+                    <Text style={{fontSize:12,fontWeight:'700',color:C.text,marginBottom:6}}>End Date</Text>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{marginBottom:14}}>
+                      {[7, 14, 30, 60, 90].map((days)=>{
+                        const d = new Date(subStartDate);
+                        d.setDate(d.getDate() + days);
+                        const isSelected = subEndDate && subEndDate.toDateString() === d.toDateString();
+                        return (
+                          <TouchableOpacity key={days}
+                            style={{marginRight:8,paddingHorizontal:14,paddingVertical:10,borderRadius:14,backgroundColor:isSelected?C.teal:C.card,borderWidth:isSelected?2:0.5,borderColor:isSelected?C.teal:C.border2}}
+                            onPress={()=>setSubEndDate(d)}>
+                            <Text style={{fontSize:11,color:isSelected?'#FFF':C.muted,fontWeight:'700'}}>{days===30?'1 Month':days===60?'2 Months':days===90?'3 Months':days===14?'2 Weeks':'1 Week'}</Text>
+                            <Text style={{fontSize:9,color:isSelected?'rgba(255,255,255,0.7)':C.muted2,marginTop:2}}>Until {d.toLocaleDateString('en-IN',{day:'numeric',month:'short'})}</Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </ScrollView>
+                  </>
+                )}
+
+                {/* Days of week */}
+                <Text style={{fontSize:12,fontWeight:'700',color:C.text,marginBottom:8}}>Days of Week (tap to select)</Text>
+                <View style={{flexDirection:'row',gap:6,marginBottom:14}}>
+                  {[['S',0],['M',1],['T',2],['W',3],['T',4],['F',5],['S',6]].map(([lbl,idx])=>{
+                    const isSelected = subDays.includes(idx);
+                    return (
+                      <TouchableOpacity key={idx}
+                        style={{flex:1,paddingVertical:12,borderRadius:12,alignItems:'center',backgroundColor:isSelected?C.teal:C.card,borderWidth:isSelected?2:0.5,borderColor:isSelected?C.teal:C.border2}}
+                        onPress={()=>setSubDays(prev => prev.includes(idx) ? prev.filter(x=>x!==idx) : [...prev, idx])}>
+                        <Text style={{fontSize:13,fontWeight:'800',color:isSelected?'#FFF':C.muted}}>{lbl}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+
+                {/* Time slot */}
+                <Text style={{fontSize:13,fontWeight:'700',color:C.text,marginBottom:10}}>Service Time</Text>
+                <View style={{flexDirection:'row',flexWrap:'wrap',gap:8,marginBottom:10}}>
+                  {TIMES.map((t,i)=>(
+                    <TouchableOpacity key={i} style={{paddingHorizontal:12,paddingVertical:9,borderRadius:18,backgroundColor:selTime===t?C.teal:C.card,borderWidth:0.5,borderColor:selTime===t?C.teal:C.border2}} onPress={()=>setSelTime(t)}>
+                      <Text style={{fontSize:12,fontWeight:'600',color:selTime===t?'#FFF':C.text2}}>{t}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+
+                {/* Summary */}
+                {subStartDate && subEndDate && subDays.length > 0 && (
+                  <View style={{backgroundColor:C.tealBg,borderRadius:12,padding:12,borderWidth:0.5,borderColor:C.tealBd,marginTop:6}}>
+                    <Text style={{color:C.teal,fontSize:12,fontWeight:'700',marginBottom:6}}>📋 Subscription Summary</Text>
+                    <Text style={{color:C.text,fontSize:11,marginBottom:2}}>From: {subStartDate.toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'})}</Text>
+                    <Text style={{color:C.text,fontSize:11,marginBottom:2}}>To: {subEndDate.toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'})}</Text>
+                    <Text style={{color:C.text,fontSize:11,marginBottom:2}}>Days: {subDays.map(d=>['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d]).join(', ')}</Text>
+                    <View style={{height:0.5,backgroundColor:C.tealBd,marginVertical:8}}/>
+                    <Text style={{color:C.text,fontSize:13,fontWeight:'700'}}>{subVisits} visits × ₹{cartTotal} = ₹{baseBeforeDisc}</Text>
+                    {subscriptionDiscount > 0 && (
+                      <Text style={{color:C.green,fontSize:11,marginTop:2}}>Subscription discount (10%): –₹{subscriptionDiscount}</Text>
+                    )}
+                  </View>
+                )}
+                {(!subStartDate || !subEndDate) && <Text style={{color:C.red,fontSize:11,marginTop:6}}>⚠️ Please select start + end dates</Text>}
+                {subDays.length === 0 && <Text style={{color:C.red,fontSize:11,marginTop:4}}>⚠️ Please select at least 1 day of week</Text>}
+                {!selTime && <Text style={{color:C.red,fontSize:11,marginTop:4}}>⚠️ Please select a time</Text>}
               </>
             )}
           </Card>
@@ -2949,18 +3136,26 @@ export default function App() {
         <DText style={{fontSize:18,fontWeight:'700',color:C.text,marginBottom:14}}>Our full service packages 🏠</DText>
         <View style={{flexDirection:'row',flexWrap:'wrap',justifyContent:'space-between',gap:10}}>
           {SERVICES.filter(s=>['home','bathroom','kitchen','car'].includes(s.id)).map(svc=>(
-            <TouchableOpacity key={svc.id} onPress={()=>openService(svc)}
-              style={{width:(W-42)/2,backgroundColor:C.card,borderRadius:18,padding:14,borderWidth:0.5,borderColor:C.border2,...SHADOW.card}}>
-              <View style={{width:'100%',height:80,borderRadius:12,backgroundColor:`${svc.iconBg}22`,alignItems:'center',justifyContent:'center',marginBottom:10}}>
-                {svcImgSource(svc.id)
-                  ? <Image source={svcImgSource(svc.id)} style={{width:56,height:56}} resizeMode="contain"/>
-                  : <Text style={{fontSize:42}}>{svc.icon}</Text>}
+            <TouchableOpacity key={svc.id} onPress={()=>openService(svc)} activeOpacity={0.85}
+              style={{width:(W-42)/2,backgroundColor:C.white,borderRadius:16,padding:16,borderWidth:0.5,borderColor:C.border2,...SHADOW.soft,marginBottom:4}}>
+              {/* Bug 3: 64x64 icon centered with 3D shadow underneath */}
+              <View style={{width:'100%',alignItems:'center',marginBottom:12}}>
+                <View style={{
+                  width:80, height:80, borderRadius:20,
+                  backgroundColor:`${svc.iconBg}22`,
+                  alignItems:'center', justifyContent:'center',
+                  borderWidth:0.5, borderColor:`${svc.iconBg}44`,
+                  ...SHADOW.soft, shadowColor: svc.shadow || svc.iconBg,
+                }}>
+                  {svcImgSource(svc.id)
+                    ? <Image source={svcImgSource(svc.id)} style={{width:64,height:64}} resizeMode="contain"/>
+                    : <Text style={{fontSize:48}}>{svc.icon}</Text>}
+                </View>
               </View>
-              <Text style={{fontSize:14,fontWeight:'700',color:C.text,marginBottom:2}} numberOfLines={1}>{svc.name}</Text>
-              <Text style={{fontSize:11,color:C.muted,marginBottom:6}} numberOfLines={1}>{svc.desc||'Full package service'}</Text>
-              <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between'}}>
-                <DText style={{fontSize:14,fontWeight:'700',color:C.orange}}>Starts ₹{svc.durations?.[0]?.price||99}</DText>
-                <Text style={{fontSize:18,color:C.orange}}>›</Text>
+              <Text style={{fontSize:15,fontWeight:'700',color:C.text,marginBottom:3,textAlign:'center'}} numberOfLines={1}>{svc.shortName || svc.name?.replace('\n',' ')}</Text>
+              <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',marginTop:4}}>
+                <DText style={{fontSize:14,fontWeight:'700',color:C.orange}}>From ₹{svc.durations?.[0]?.price||99}</DText>
+                <Text style={{fontSize:18,color:C.orange,fontWeight:'700'}}>›</Text>
               </View>
             </TouchableOpacity>
           ))}
@@ -3273,8 +3468,8 @@ export default function App() {
   // ── Change 5: BookingsTab — TODAY / UPCOMING / PAST sections ──────────────
   const BookingsTab=()=>{
     const todayStr = new Date().toISOString().split('T')[0];
-    // Filter out recurring child docs from main view (they appear inside parent)
-    const parentOrders = orders.filter(o=>!o.isRecurringChild);
+    // Bug 4+5: Filter out child visit docs from main view (they appear inside parent)
+    const parentOrders = orders.filter(o => !o.isChildVisit && !o.isRecurringChild);
     // Categorise
     const todayOrders    = parentOrders.filter(o=>{
       if(o.bookingMode==='instant') return true;
@@ -3290,17 +3485,25 @@ export default function App() {
     );
 
     const OrderCard = ({o, showVisits=false})=>{
-      const childVisits = orders.filter(c=>c.parentOrderId===o.orderId&&c.isRecurringChild);
+      // Bug 4+5: child visits use new parentSubscriptionId+isChildVisit (legacy: parentOrderId+isRecurringChild)
+      const childVisits = orders.filter(c =>
+        (c.parentSubscriptionId === o.orderId && c.isChildVisit) ||
+        (c.parentOrderId === o.orderId && c.isRecurringChild)
+      );
       const [expanded,setExpanded]=React.useState(false);
+      const isSubscription = o.bookingMode === 'subscription';
+      const isMultiSchedule = o.bookingMode === 'scheduled' && (o.totalVisits || 1) > 1;
+      const hasMultipleVisits = isSubscription || isMultiSchedule;
       return(
         <TouchableOpacity style={{backgroundColor:C.card,borderRadius:22,marginBottom:10,overflow:'hidden',...SHADOW.soft}}
           onPress={()=>{setTrackOrd(o);setScreen('track');}}>
-          <View style={{height:4,backgroundColor:o.bookingMode==='recurring'?C.gold:o.status==='completed'?C.green:C.orange}}/>
+          <View style={{height:4,backgroundColor:isSubscription?C.teal:isMultiSchedule?C.gold:o.status==='completed'?C.green:C.orange}}/>
           <View style={{padding:14}}>
             <View style={{flexDirection:'row',justifyContent:'space-between',marginBottom:8}}>
               <View style={{flexDirection:'row',alignItems:'center',gap:6}}>
                 <Text style={{color:C.orange,fontWeight:'700',fontSize:12}}>#{o.orderId}</Text>
-                {o.bookingMode==='recurring'&&<View style={{backgroundColor:C.goldBg,paddingHorizontal:7,paddingVertical:2,borderRadius:8,borderWidth:0.5,borderColor:C.goldBd}}><Text style={{color:C.gold,fontSize:9,fontWeight:'700'}}>🔄 {o.recurFreq}</Text></View>}
+                {isSubscription && <View style={{backgroundColor:C.tealBg,paddingHorizontal:7,paddingVertical:2,borderRadius:8,borderWidth:0.5,borderColor:C.tealBd}}><Text style={{color:C.teal,fontSize:9,fontWeight:'700'}}>🔁 Subscription</Text></View>}
+                {isMultiSchedule && <View style={{backgroundColor:C.goldBg,paddingHorizontal:7,paddingVertical:2,borderRadius:8,borderWidth:0.5,borderColor:C.goldBd}}><Text style={{color:C.gold,fontSize:9,fontWeight:'700'}}>📅 {o.totalVisits} visits</Text></View>}
               </View>
               <View style={{flexDirection:'row',gap:6,alignItems:'center'}}>
                 {o.rated&&<Text style={{fontSize:10}}>{'⭐'.repeat(Math.min(o.rating||0,5))}</Text>}
@@ -3333,21 +3536,21 @@ export default function App() {
                 )}
               </View>
             </View>
-            {/* Recurring visits expandable (Change 5) */}
-            {o.bookingMode==='recurring'&&childVisits.length>0&&(
-              <TouchableOpacity style={{marginTop:8,backgroundColor:C.goldSolid,borderRadius:10,padding:10,borderWidth:0.5,borderColor:C.goldBd,flexDirection:'row',alignItems:'center',justifyContent:'space-between'}}
+            {/* Bug 4+5: Expandable upcoming visits (subscription or multi-date scheduled) */}
+            {hasMultipleVisits && childVisits.length > 0 && (
+              <TouchableOpacity style={{marginTop:8,backgroundColor:isSubscription?C.tealBg:C.goldSolid,borderRadius:10,padding:10,borderWidth:0.5,borderColor:isSubscription?C.tealBd:C.goldBd,flexDirection:'row',alignItems:'center',justifyContent:'space-between'}}
                 onPress={(e)=>{e.stopPropagation?.();setExpanded(ex=>!ex);}}>
-                <Text style={{color:C.gold,fontWeight:'700',fontSize:11}}>📆 {childVisits.length} upcoming visits</Text>
-                <Text style={{color:C.gold,fontSize:14}}>{expanded?'▲':'▼'}</Text>
+                <Text style={{color:isSubscription?C.teal:C.gold,fontWeight:'700',fontSize:11}}>📆 {childVisits.length} upcoming visits</Text>
+                <Text style={{color:isSubscription?C.teal:C.gold,fontSize:14}}>{expanded?'▲':'▼'}</Text>
               </TouchableOpacity>
             )}
-            {expanded&&childVisits.map((cv,ci)=>(
-              <View key={ci} style={{backgroundColor:C.goldSolid,marginTop:4,borderRadius:10,padding:10,flexDirection:'row',alignItems:'center',gap:8,borderWidth:0.5,borderColor:C.goldBd}}>
-                <View style={{width:22,height:22,borderRadius:11,backgroundColor:C.gold,alignItems:'center',justifyContent:'center'}}>
-                  <Text style={{color:'#FFF',fontSize:10,fontWeight:'800'}}>{ci+2}</Text>
+            {expanded && childVisits.map((cv,ci)=>(
+              <View key={ci} style={{backgroundColor:isSubscription?C.tealBg:C.goldSolid,marginTop:4,borderRadius:10,padding:10,flexDirection:'row',alignItems:'center',gap:8,borderWidth:0.5,borderColor:isSubscription?C.tealBd:C.goldBd}}>
+                <View style={{width:22,height:22,borderRadius:11,backgroundColor:isSubscription?C.teal:C.gold,alignItems:'center',justifyContent:'center'}}>
+                  <Text style={{color:'#FFF',fontSize:10,fontWeight:'800'}}>{cv.visitNumber || (ci+2)}</Text>
                 </View>
-                <Text style={{fontSize:11,color:C.text,flex:1}} numberOfLines={1}>{cv.slot?.split('·')[1]||cv.scheduledDate}</Text>
-                <Badge label={cv.status||'scheduled'} color={C.gold}/>
+                <Text style={{fontSize:11,color:C.text,flex:1}} numberOfLines={1}>{cv.scheduledDate} {cv.scheduledTime?`at ${cv.scheduledTime}`:''}</Text>
+                <Badge label={cv.status||'scheduled'} color={isSubscription?C.teal:C.gold}/>
               </View>
             ))}
           </View>
