@@ -1304,6 +1304,27 @@ export default function App() {
       if(subDays.length===0){Alert.alert('Days Required','Please pick at least one day of the week');return;}
       if(!selTime){Alert.alert('Time Required','Please select a time slot');return;}
       if(subVisits===0){Alert.alert('No Visits','Selected dates don\'t include any of your chosen weekdays — adjust dates or days.');return;}
+      // FIX: Subscription is per-service. If multiple items in cart, ask user
+      // to pick ONE — daily/weekly subscription for "Home Cleaning + Bathroom +
+      // Kitchen" doesn't make sense; each service has different ideal cadence.
+      if(cart.length > 1){
+        const buttons = cart.map(item => ({
+          text: `${item.icon || '•'} ${item.name}`,
+          onPress: () => {
+            setCart([item]);
+            setTimeout(() => {
+              Alert.alert('✅ Cart Updated', `Subscribing to "${item.name}".\n\nOther services were removed — book them separately later.\n\nTap "🔒 Confirm Booking" again to proceed.`);
+            }, 150);
+          },
+        }));
+        buttons.push({ text: 'Cancel', style: 'cancel' });
+        Alert.alert(
+          '🔁 Subscribe to Which Service?',
+          'Monthly subscriptions are for ONE service at a time (different services need different cadence — Home Cleaning daily makes sense, Bathroom daily doesn\'t).\n\nPick the service you want repeated:',
+          buttons
+        );
+        return;
+      }
     }
     if(cart.length===0){Alert.alert('Cart Empty','Please add a service first');return;}
     // FIX (audit): block bookings with empty address — was silently submitting before
@@ -2522,6 +2543,16 @@ export default function App() {
                 <View style={{backgroundColor:C.tealBg,borderRadius:10,padding:8,marginBottom:12,borderWidth:0.5,borderColor:C.tealBd}}>
                   <Text style={{color:C.teal,fontSize:11,fontWeight:'600'}}>🔁 Pick start + end date, choose days of week. 10% discount on subscription. Single upfront payment.</Text>
                 </View>
+                {/* Warning if multiple services — subscription is per-service */}
+                {cart.length > 1 && (
+                  <View style={{backgroundColor:'rgba(232,82,10,0.10)',borderRadius:10,padding:10,marginBottom:12,borderWidth:0.5,borderColor:'rgba(232,82,10,0.30)',flexDirection:'row',gap:8,alignItems:'flex-start'}}>
+                    <Text style={{fontSize:14}}>⚠️</Text>
+                    <View style={{flex:1}}>
+                      <Text style={{color:C.orange,fontSize:11,fontWeight:'700',marginBottom:3}}>Subscription is for ONE service</Text>
+                      <Text style={{color:C.muted,fontSize:10,lineHeight:14}}>You have {cart.length} services in cart. When you confirm, you'll pick which one to subscribe to. Book the others separately.</Text>
+                    </View>
+                  </View>
+                )}
 
                 {/* Start Date — quick picker (next 30 days) */}
                 <Text style={{fontSize:12,fontWeight:'700',color:C.text,marginBottom:6}}>Start Date</Text>
