@@ -77,6 +77,53 @@ const logWalletTransaction = async (phone, amount, reason, type = 'credit') => {
   } catch (e) { console.error('logWalletTransaction:', e); return false; }
 };
 
+// ── Bug 7: Saved Addresses CRUD ─────────────────────────────────────
+// Subcollection: users/{phone}/addresses/{autoId}
+// Fields: label ('Home'|'Office'|'Other'), flat, buildingName, streetName,
+//         landmark, area, fullAddress, isDefault, createdAt
+const saveAddress = async (phone, addressData, existingId = null) => {
+  try {
+    const data = {
+      ...addressData,
+      updatedAt: firestore.FieldValue.serverTimestamp(),
+    };
+    if (existingId) {
+      await firestore().collection('users').doc(phone)
+        .collection('addresses').doc(existingId).set(data, { merge: true });
+      return existingId;
+    } else {
+      const ref = await firestore().collection('users').doc(phone)
+        .collection('addresses').add({
+          ...data,
+          createdAt: firestore.FieldValue.serverTimestamp(),
+        });
+      return ref.id;
+    }
+  } catch (e) { console.error('saveAddress:', e); return null; }
+};
+
+const deleteAddress = async (phone, addressId) => {
+  try {
+    await firestore().collection('users').doc(phone)
+      .collection('addresses').doc(addressId).delete();
+    return true;
+  } catch (e) { console.error('deleteAddress:', e); return false; }
+};
+
+const setDefaultAddress = async (phone, addressId) => {
+  try {
+    // Clear isDefault from all addresses, then set on the target
+    const snap = await firestore().collection('users').doc(phone)
+      .collection('addresses').get();
+    const batch = firestore().batch();
+    snap.docs.forEach(doc => {
+      batch.update(doc.ref, { isDefault: doc.id === addressId });
+    });
+    await batch.commit();
+    return true;
+  } catch (e) { console.error('setDefaultAddress:', e); return false; }
+};
+
 const createBooking = async (bookingData) => {
   try {
     const orderId = 'VG' + Date.now().toString().slice(-6);
@@ -836,6 +883,14 @@ export default function App() {
   const [phoneError,    setPhoneError]    = useState('');
   const [otpError,      setOtpError]      = useState('');
 
+  // ── Bug 7: Saved Addresses state ────────────────────────────────
+  const [savedAddrs,    setSavedAddrs]    = useState([]);    // [{id, label, flat, ...}]
+  const [addrsUnsub,    setAddrsUnsub]    = useState(null);
+  const [showSaveAddr,  setShowSaveAddr]  = useState(false); // post-booking save prompt
+  const [pendingAddr,   setPendingAddr]   = useState(null);  // address pending save
+  const [addrLabel,     setAddrLabel]     = useState('Home'); // label for save modal
+  const [editingAddrId, setEditingAddrId] = useState(null);  // for edit mode
+
   const fadeA  = useRef(new Animated.Value(0)).current;
   const trackMapRef = useRef(null); // WebView ref for live map
   const scaleA = useRef(new Animated.Value(0.85)).current;
@@ -897,6 +952,15 @@ export default function App() {
                 err=>console.error('orders:',err));
             setOrdersUnsub(()=>unsub);
             registerCustomerFCM(ph);
+
+            // ── Bug 7: Saved addresses listener ──────────────────
+            const unsubAddr = firestore().collection('users').doc(ph)
+              .collection('addresses').orderBy('createdAt','desc')
+              .onSnapshot(
+                s => setSavedAddrs(s.docs.map(d => ({ id: d.id, ...d.data() }))),
+                err => console.error('addresses:', err)
+              );
+            setAddrsUnsub(()=>unsubAddr);
           }
         }catch(e){ console.log('session restore:',e); }
       }
@@ -907,6 +971,20 @@ export default function App() {
     });
     return ()=>unsubAuth();
   },[]);
+
+  // ── Bug 7: Auto-fill default address when entering step4 with empty form ──
+  useEffect(()=>{
+    if (screen !== 'step4') return;
+    if (flat || buildingName) return; // already has data — don't overwrite
+    if (savedAddrs.length === 0) return;
+    const def = savedAddrs.find(a => a.isDefault) || savedAddrs[0];
+    if (!def) return;
+    setFlat(def.flat || '');
+    setBuildingName(def.buildingName || '');
+    setStreetName(def.streetName || '');
+    setLandmark(def.landmark || '');
+    if (def.area) setSelArea(def.area);
+  }, [screen, savedAddrs.length]);
 
   // ── Live worker location listener ─────────────────────────────────
   useEffect(()=>{
@@ -1091,6 +1169,12 @@ export default function App() {
           .onSnapshot(snap=>setOrders(snap.docs.map(d=>({id:d.id,...d.data()}))),
             err=>console.error('orders:',err));
         setOrdersUnsub(()=>unsub);
+        // Bug 7: Saved addresses listener
+        const unsubAddr = firestore().collection('users').doc(phone)
+          .collection('addresses').orderBy('createdAt','desc')
+          .onSnapshot(s => setSavedAddrs(s.docs.map(d => ({ id: d.id, ...d.data() }))),
+            err=>console.error('addresses:',err));
+        setAddrsUnsub(()=>unsubAddr);
         registerCustomerFCM(phone);
         setLoading(false);
         setScreen('main');setTab('home');
@@ -1120,6 +1204,12 @@ export default function App() {
           .onSnapshot(snap=>setOrders(snap.docs.map(d=>({id:d.id,...d.data()}))),
             err=>console.error('orders:',err));
         setOrdersUnsub(()=>unsub2);
+        // Bug 7: Saved addresses listener (new users start empty)
+        const unsubAddr2 = firestore().collection('users').doc(phone)
+          .collection('addresses').orderBy('createdAt','desc')
+          .onSnapshot(s => setSavedAddrs(s.docs.map(d => ({ id: d.id, ...d.data() }))),
+            err=>console.error('addresses:',err));
+        setAddrsUnsub(()=>unsubAddr2);
         registerCustomerFCM(phone);
         setLoading(false);
         setScreen('main');setTab('home');
@@ -1296,9 +1386,40 @@ export default function App() {
         setWallet(newBalance);
       }
 
+      // ── Bug 7: Save the address used in this booking (avoid duplicates) ──
+      const addrSig = (a) => `${(a.flat||'').trim().toLowerCase()}|${(a.buildingName||'').trim().toLowerCase()}|${(a.area||'').trim().toLowerCase()}`;
+      const currentSig = addrSig({flat, buildingName, area: selArea});
+      const alreadySaved = savedAddrs.some(a => addrSig(a) === currentSig);
+      const addrSnapshot = {
+        flat, buildingName, streetName, landmark,
+        area: selArea, city: 'Visakhapatnam',
+        fullAddress: fullAddr,
+      };
+
       resetForm();
       Alert.alert('🎉 Booking Confirmed!',`Order #${result.orderId}\n📅 ${slot}\n👩 ${pro.name}\n🔐 OTP: ${result.otp}`,[
-        {text:'Track Order',onPress:()=>{setTrackOrd(o);setScreen('track');}},
+        {text:'Track Order',onPress:()=>{
+          setTrackOrd(o);
+          setScreen('track');
+          // Bug 7: Offer to save address (only if new + has flat number)
+          if (flat && !alreadySaved) {
+            setTimeout(()=>{
+              Alert.alert(
+                '📍 Save this address?',
+                'Next time you book, this will be auto-filled — no retyping.',
+                [
+                  { text: 'No thanks', style: 'cancel' },
+                  { text: '🏢 Office', onPress: ()=>{
+                    saveAddress(phone, {...addrSnapshot, label:'Office', isDefault: savedAddrs.length===0});
+                  }},
+                  { text: '🏠 Home', onPress: ()=>{
+                    saveAddress(phone, {...addrSnapshot, label:'Home', isDefault: savedAddrs.length===0});
+                  }},
+                ]
+              );
+            }, 800);
+          }
+        }},
       ]);
     }catch(err){
       console.error('placeOrder error:',err);
@@ -2053,6 +2174,58 @@ export default function App() {
           </View>
         </Modal>
         <ScrollView style={{flex:1,padding:16}} keyboardShouldPersistTaps="handled">
+          {/* ── Bug 7: Saved Addresses quick-select (only if user has saved addresses) ── */}
+          {savedAddrs.length > 0 && (
+            <Card style={{marginBottom:14,padding:14}}>
+              <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center',marginBottom:10}}>
+                <Text style={{fontWeight:'700',color:C.text,fontSize:14}}>📍 Saved Addresses</Text>
+                <TouchableOpacity onPress={()=>{
+                  // Clear fields for new address entry
+                  setFlat(''); setBuildingName(''); setStreetName(''); setLandmark('');
+                }}>
+                  <Text style={{color:C.orange,fontSize:12,fontWeight:'700'}}>+ New</Text>
+                </TouchableOpacity>
+              </View>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                {savedAddrs.map((addr) => {
+                  const isSelected = flat === addr.flat && buildingName === (addr.buildingName||'');
+                  return (
+                    <TouchableOpacity
+                      key={addr.id}
+                      onPress={() => {
+                        setFlat(addr.flat || '');
+                        setBuildingName(addr.buildingName || '');
+                        setStreetName(addr.streetName || '');
+                        setLandmark(addr.landmark || '');
+                        if (addr.area) setSelArea(addr.area);
+                      }}
+                      style={{
+                        marginRight: 10,
+                        padding: 12,
+                        borderRadius: 14,
+                        borderWidth: isSelected ? 2 : 0.5,
+                        borderColor: isSelected ? C.orange : C.border2,
+                        backgroundColor: isSelected ? C.orangeBg : C.card,
+                        minWidth: 180, maxWidth: 240,
+                      }}>
+                      <View style={{flexDirection:'row',alignItems:'center',gap:6,marginBottom:4}}>
+                        <Text style={{fontSize:14}}>
+                          {addr.label === 'Home' ? '🏠' : addr.label === 'Office' ? '🏢' : '📍'}
+                        </Text>
+                        <Text style={{fontWeight:'700',color:isSelected?C.orange:C.text,fontSize:13}}>
+                          {addr.label || 'Saved'}
+                          {addr.isDefault && <Text style={{color:C.gold,fontSize:11}}> ★ Default</Text>}
+                        </Text>
+                      </View>
+                      <Text style={{fontSize:11,color:C.muted,lineHeight:14}} numberOfLines={2}>
+                        {[addr.flat, addr.buildingName, addr.area].filter(Boolean).join(', ')}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+            </Card>
+          )}
           {/* ✅ REAL MAP — updates when area or building changes */}
           <Card style={{marginBottom:16,padding:0,overflow:'hidden'}}>
             <View style={{height:150,overflow:'hidden',position:'relative'}}>
@@ -2408,6 +2581,83 @@ export default function App() {
       `}
     </script></body></html>`;
   };
+
+  // ════════════════════════════════════════════════════════════════
+  // Bug 7: SAVED ADDRESSES MANAGEMENT SCREEN
+  // ════════════════════════════════════════════════════════════════
+  if(screen==='addresses'){
+    return(
+      <SafeAreaView style={{flex:1,backgroundColor:C.bg}}>
+        <View style={S.topBar}>
+          <TouchableOpacity onPress={()=>setScreen('main')} style={S.backCircle}><Text style={S.backArrow}>←</Text></TouchableOpacity>
+          <DText style={S.topTitle}>Saved Addresses</DText>
+          <View style={{width:36}}/>
+        </View>
+        <View style={{height:3,backgroundColor:C.orange}}/>
+        <ScrollView style={{flex:1,padding:16}}>
+          {savedAddrs.length === 0 && (
+            <Card style={{padding:30,alignItems:'center',marginTop:40}}>
+              <Text style={{fontSize:48,marginBottom:14}}>📍</Text>
+              <DText style={{fontSize:17,fontWeight:'700',color:C.text,marginBottom:6,textAlign:'center'}}>No saved addresses yet</DText>
+              <Text style={{fontSize:13,color:C.muted,textAlign:'center',lineHeight:18}}>
+                Book your first service. You'll get a chance to save the address — then it auto-fills next time.
+              </Text>
+            </Card>
+          )}
+          {savedAddrs.map((addr) => (
+            <Card key={addr.id} style={{marginBottom:12,padding:14}}>
+              <View style={{flexDirection:'row',alignItems:'center',marginBottom:8}}>
+                <Text style={{fontSize:22,marginRight:10}}>
+                  {addr.label === 'Home' ? '🏠' : addr.label === 'Office' ? '🏢' : '📍'}
+                </Text>
+                <View style={{flex:1}}>
+                  <Text style={{fontWeight:'700',color:C.text,fontSize:15}}>
+                    {addr.label || 'Saved'}
+                    {addr.isDefault && (
+                      <Text style={{color:C.gold,fontSize:11,fontWeight:'700'}}> ★ Default</Text>
+                    )}
+                  </Text>
+                  <Text style={{fontSize:12,color:C.muted,marginTop:2}}>
+                    {[addr.flat, addr.buildingName, addr.streetName, addr.landmark, addr.area].filter(Boolean).join(', ')}
+                  </Text>
+                </View>
+              </View>
+              <View style={{flexDirection:'row',gap:8,marginTop:6}}>
+                {!addr.isDefault && (
+                  <TouchableOpacity
+                    style={{flex:1,padding:10,borderRadius:14,borderWidth:0.5,borderColor:C.goldBd,backgroundColor:C.goldSolid,alignItems:'center'}}
+                    onPress={async()=>{
+                      const ok = await setDefaultAddress(phone, addr.id);
+                      if(ok) Alert.alert('✅ Default set', `${addr.label || 'This address'} is now your default.`);
+                    }}>
+                    <Text style={{color:C.gold,fontSize:12,fontWeight:'700'}}>★ Set Default</Text>
+                  </TouchableOpacity>
+                )}
+                <TouchableOpacity
+                  style={{flex:1,padding:10,borderRadius:14,borderWidth:0.5,borderColor:C.redBd,backgroundColor:C.redSolid,alignItems:'center'}}
+                  onPress={()=>{
+                    Alert.alert(
+                      'Delete address?',
+                      `Remove ${addr.label || 'this address'}?`,
+                      [
+                        { text: 'Cancel', style: 'cancel' },
+                        { text: 'Delete', style: 'destructive', onPress: async()=>{
+                          const ok = await deleteAddress(phone, addr.id);
+                          if(!ok) Alert.alert('Failed', 'Could not delete. Try again.');
+                        }},
+                      ]
+                    );
+                  }}>
+                  <Text style={{color:C.red,fontSize:12,fontWeight:'700'}}>🗑 Delete</Text>
+                </TouchableOpacity>
+              </View>
+            </Card>
+          ))}
+          <View style={{height:30}}/>
+        </ScrollView>
+      </SafeAreaView>
+    );
+  }
 
   if(screen==='track'&&trackOrd){
     const pro=trackOrd.professional;
@@ -3247,7 +3497,7 @@ export default function App() {
             ['📋','My Bookings',()=>setTab('bookings')],
             ['🛒','Cart',()=>setTab('cart')],
             ['🎁','Offers',()=>setTab('offers')],
-            ['📍','Saved Addresses',()=>Alert.alert('Coming Soon')],
+            ['📍','Saved Addresses',()=>setScreen('addresses')],
             ['💳','Payment Methods',()=>Alert.alert('Coming Soon')],
             ['🔔','Notifications',()=>Alert.alert('Notifications 🔔','VEGA50 expires today!')],
             ['⭐','Rate VEGA App',()=>Alert.alert('Thank You! 🙏')],
@@ -3262,6 +3512,9 @@ export default function App() {
           {user&&<TouchableOpacity style={{borderWidth:0.5,borderColor:C.redBd,borderRadius:20,padding:14,marginTop:8,marginBottom:40,alignItems:'center',backgroundColor:C.redSolid}} onPress={()=>{
             if(ordersUnsub) ordersUnsub();
             setOrdersUnsub(null);
+            if(addrsUnsub) addrsUnsub();    // Bug 7: unsub addresses listener
+            setAddrsUnsub(null);
+            setSavedAddrs([]);
             setOrders([]);
             setUser(null);
             setPhone('');
