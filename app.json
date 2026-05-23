@@ -77,6 +77,15 @@
         "projectId": "a2cb81a3-7b99-49f5-9ec4-6ace8e81d762"
       }
     },
-    "owner": "mahesh1331"
+    "owner": "mahesh1331",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/a2cb81a3-7b99-49f5-9ec4-6ace8e81d762",
+      "checkAutomatically": "ON_LOAD",
+      "fallbackToCacheTimeout": 0,
+      "enabled": true
+    }
   }
 }
