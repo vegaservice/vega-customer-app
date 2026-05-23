@@ -42,6 +42,11 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // ── WORKER LOCATION TRAIL (subcollection — route history for Admin map) ─
+    match /workers/{workerId}/location_trail/{trailId} {
+      allow read, write: if request.auth != null;
+    }
+
     // ── WALLET TRANSACTIONS (Bug 2 — audit trail for credits) ─
     match /wallet_transactions/{txnId} {
       allow read:   if request.auth != null;
