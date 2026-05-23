@@ -5,8 +5,11 @@
   "scripts": {
     "start": "expo start --clear",
     "android": "expo run:android",
-    "build:preview": "eas build --platform android --profile preview",
-    "build:prod": "eas build --platform android --profile production",
+    "check-rules": "node scripts/check-firestore-rules.js",
+    "predeploy:rules": "node scripts/check-firestore-rules.js",
+    "deploy:rules": "firebase deploy --only firestore:rules --project vega-home-service",
+    "build:preview": "node scripts/check-firestore-rules.js && eas build --platform android --profile preview",
+    "build:prod": "node scripts/check-firestore-rules.js && eas build --platform android --profile production",
     "test": "jest"
   },
   "dependencies": {

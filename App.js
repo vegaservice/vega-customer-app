@@ -174,7 +174,10 @@ const validatePromoCode = async (code) => {
 
 const listenToBooking = (orderId, callback) => {
   return firestore().collection('bookings').doc(orderId)
-    .onSnapshot(doc => { if (doc.exists) callback({ id: doc.id, ...doc.data() }); });
+    .onSnapshot(
+      doc => { if (doc.exists) callback({ id: doc.id, ...doc.data() }); },
+      err => console.log('listenToBooking error:', err.message)
+    );
 };
 
 const DEMO_MODE = false;  // 🚀 PRODUCTION — Firebase active
@@ -1007,19 +1010,22 @@ export default function App() {
     const wid = trackOrd?.assignedWorkerId;
     if(!wid){ setWorkerLoc(null); return; }
     const unsub = firestore().collection('workers').doc(wid)
-      .onSnapshot(doc=>{
-        const d = doc.data();
-        if(d?.lastLat && d?.lastLng){
-          const newLoc = {lat: d.lastLat, lng: d.lastLng};
-          setWorkerLoc(newLoc);
-          // Inject JS to smoothly move the marker without full reload
-          if(trackMapRef.current){
-            trackMapRef.current.injectJavaScript(
-              `if(window.workerMarker){ window.workerMarker.setLatLng([${d.lastLat},${d.lastLng}]); window.liveMap.panTo([${d.lastLat},${d.lastLng}], {animate:true, duration:1}); } true;`
-            );
+      .onSnapshot(
+        doc=>{
+          const d = doc.data();
+          if(d?.lastLat && d?.lastLng){
+            const newLoc = {lat: d.lastLat, lng: d.lastLng};
+            setWorkerLoc(newLoc);
+            // Inject JS to smoothly move the marker without full reload
+            if(trackMapRef.current){
+              trackMapRef.current.injectJavaScript(
+                `if(window.workerMarker){ window.workerMarker.setLatLng([${d.lastLat},${d.lastLng}]); window.liveMap.panTo([${d.lastLat},${d.lastLng}], {animate:true, duration:1}); } true;`
+              );
+            }
           }
-        }
-      });
+        },
+        err => console.log('worker location listener error:', err.message)
+      );
     return ()=>unsub();
   },[trackOrd?.assignedWorkerId]);
 
