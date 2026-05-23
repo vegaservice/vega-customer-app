@@ -89,6 +89,30 @@ service cloud.firestore {
       allow read, write: if request.auth != null;
     }
 
+    // ── COMPLAINTS (Hub Manager handles customer complaints) ─
+    match /complaints/{complaintId} {
+      allow read:   if request.auth != null;
+      allow create: if request.auth != null;
+      allow update: if request.auth != null;
+      allow delete: if false;
+    }
+
+    // ── ADMINS (Admin app creates a doc on first login) ────
+    match /admins/{adminId} {
+      allow read:   if request.auth != null;
+      allow create: if request.auth != null;
+      allow update: if request.auth != null;
+      allow delete: if false;
+    }
+
+    // ── LOCATION_TRAIL (Worker GPS trail history) ──────────
+    match /location_trail/{trailId} {
+      allow read:   if request.auth != null;
+      allow create: if request.auth != null;
+      allow update: if request.auth != null;
+      allow delete: if false;
+    }
+
     // ── DEFAULT: deny everything else ──────────────────────
     match /{document=**} {
       allow read, write: if false;
