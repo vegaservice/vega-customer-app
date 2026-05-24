@@ -330,15 +330,27 @@ const PROFESSIONALS = [
 const SERVICES = [
   { id:'home',    name:'Home\nCleaning',  shortName:'Home Cleaning',   icon:'🏠', gradient:['#FF6B35','#C8541A'], shadow:'rgba(200,84,26,0.4)',  iconBg:'#FF8B55', tagline:'Sweeping, mopping & full home clean',       workerLabel:'Cleaners',    badge:'Most Booked',
     durations:[
-      { id:'h1',hrs:1,label:'1 Hour', price:99, mrp:199,popular:false,
-        tasks:['Mopping all rooms','Sweeping all rooms','Utensils cleaning','Kitchen counter clean'],
-        note:'Best for daily maintenance' },
-      { id:'h2',hrs:2,label:'2 Hours',price:199,mrp:399,popular:true,
-        tasks:['Mopping all rooms','Sweeping all rooms','Utensils cleaning','Kitchen counter clean','Folding clothes (up to 20 pairs)','Ironing clothes (up to 20 pairs)','Surface dusting — tables, shelves, fans exterior'],
-        note:'Best for weekly cleaning' },
-      { id:'h3',hrs:3,label:'3 Hours',price:349,mrp:699,popular:false,
-        tasks:['Mopping all rooms','Sweeping all rooms','Utensils cleaning','Kitchen counter clean','Folding clothes (up to 20 pairs)','Ironing clothes (up to 20 pairs)','Surface dusting — tables, shelves, fans exterior','Full dust removal from corners & ceilings','Deep surface scrub','Suitable for: guests arriving, home unused 10+ days, large families'],
-        note:'Best when guests are coming or home needs deep refresh' },
+      { id:'fm_ut', label:'Floor + Mop + Utensils', price:99, mrp:250, popular:true, badge:'MOST BOOKED',
+        tasks:['Sweeping all rooms','Wet mopping all floors','Washing all utensils','Kitchen sink quick wipe'],
+        note:'Daily favourite — covers floors + utensils in one visit' },
+      { id:'fm',    label:'Floor + Mop',              price:89, mrp:149, popular:false,
+        tasks:['Sweeping all rooms','Wet mopping all floors','Surface dust on tables'],
+        note:'Quick daily floor refresh' },
+      { id:'ut',    label:'Utensils Only',            price:59, mrp:99,  popular:false,
+        tasks:['Wash all utensils in sink','Wipe stove top after','Clean sink area'],
+        note:'Just dishes — fast turnaround' },
+      { id:'kb',    label:'Basic Kitchen',            price:39, mrp:59,  popular:false,
+        tasks:['Kitchen counter scrub','Sink cleaning & descaling','Stove top wipe'],
+        note:'Quick kitchen daily clean' },
+      { id:'kc',    label:'Kitchen Cupboard',         price:39, mrp:59,  popular:false,
+        tasks:['Cupboard exterior wipe','Handle polish','Door surface clean'],
+        note:'Cupboard exterior shine' },
+      { id:'st',    label:'Stove Cleaning',           price:39, mrp:59,  popular:false,
+        tasks:['Stove top deep scrub','Burner clean','Drip tray wash'],
+        note:'Remove built-up grease from stove' },
+      { id:'fg',    label:'Refrigerator Cleaning',    price:59, mrp:99,  popular:false,
+        tasks:['Interior shelf wipe','Door seal cleaning','Exterior polish','Vegetable tray wash'],
+        note:'Interior + exterior fridge refresh' },
     ],
     addons:[
       {id:'fan',       name:'Fan Cleaning',             price:25,  icon:'🌀', desc:'All ceiling fans cleaned'},
@@ -3893,7 +3905,7 @@ export default function App() {
           {search.length<2?(
             <>
               <Text style={{color:C.muted,fontWeight:'700',fontSize:12,letterSpacing:1,marginBottom:16}}>POPULAR SEARCHES</Text>
-              {['Home Cleaning','Bathroom Cleaning','Kitchen Cleaning','Car Wash','Beauty Care','Deep Cleaning','Elder Care','Sofa Cleaning'].map((q,i)=>(
+              {['Home Cleaning','Bathroom Cleaning','Kitchen Cleaning','Car Cleaning','Beauty Care','Deep Cleaning','Elder Care','Sofa Cleaning'].map((q,i)=>(
                 <TouchableOpacity key={i} style={{flexDirection:'row',alignItems:'center',gap:14,paddingVertical:13,borderBottomWidth:0.5,borderBottomColor:C.border2}} onPress={()=>setSearch(q)}>
                   <View style={{width:38,height:38,borderRadius:12,backgroundColor:C.light,alignItems:'center',justifyContent:'center',borderWidth:0.5,borderColor:C.border}}><Text style={{fontSize:16}}>🔍</Text></View>
                   <Text style={{fontSize:14,color:C.text}}>{q}</Text>
