@@ -1410,6 +1410,7 @@ export default function App() {
         userId: phone,
         customerPhone: phone,
         userName: user.name,
+        customerName: user.name,
         userPhone: phone,
         assignedWorkerId: null,
         assignedWorkerName: null,
