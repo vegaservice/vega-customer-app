@@ -1446,7 +1446,6 @@ export default function App() {
         visitNumber:           1,                           // this is the first visit doc
         parentSubscriptionId:  null,                        // set when creating child docs below
         totalPaid:             finalTotal,
-        paymentStatus:         selPayMethod==='cash' ? 'pending' : 'paid',
         // Legacy fields kept for backward compat with admin/worker apps
         recurFreq:     null,
         recurDuration: null,
@@ -1926,7 +1925,12 @@ export default function App() {
                     onPress={()=>{
                       setCarType(ct);
                       const updDur = svc.durations.find(d=>d.id===(selDur?.id||'c1'));
-                      if(updDur) setSelDur({...updDur, price: svc.carPricing[ct==='hatchback'?'single':ct==='sedan'?'single':'single'][ct] || updDur.price});
+                      // FIX (audit #14): map duration id → pricing key (single/weekly/monthly).
+                      // Previously used 'single' for every package — so SUV Weekly/Monthly stayed at hatchback price.
+                      if(updDur){
+                        const priceKey = updDur.id==='c1'?'single':updDur.id==='c2'?'weekly':updDur.id==='c3'?'monthly':'single';
+                        setSelDur({...updDur, price: svc.carPricing[priceKey]?.[ct] || updDur.price});
+                      }
                     }}>
                     <Text style={{fontSize:24,marginBottom:4}}>{ico}</Text>
                     <Text style={{fontSize:11,fontWeight:'700',color:carType===ct?C.teal:C.text,textAlign:'center'}}>{label}</Text>
