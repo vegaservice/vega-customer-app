@@ -804,40 +804,124 @@ const StepBar = ({ step, total=4, labels }) => (
 // ════════════════════════════════════════════════════════════════
 
 // ── Mock Payment Modal (replace with real Razorpay when keys available) ──────
-const MockPayModal = ({ visible, amount, method, onSuccess }) => {
-  const [step, setStep] = React.useState(0); // 0=processing, 1=success
-  React.useEffect(() => {
-    if (!visible) { setStep(0); return; }
-    const t = setTimeout(() => setStep(1), 2400);
-    return () => clearTimeout(t);
-  }, [visible]);
-  const label = { upi:'UPI / GPay', card:'Debit / Credit Card', netbanking:'Net Banking' }[method] || method;
+// ── Razorpay Checkout via WebView ─────────────────────────────────────
+// JS-only integration — no native package, no build needed.
+// Config (key_id, mode) read from Firestore at `app_config/payment`.
+// Admin updates the doc in Firebase Console to swap test↔live keys.
+const RazorpayCheckoutModal = ({ visible, amount, method, customer, onSuccess, onCancel, payConfig }) => {
+  const handleMessage = (event) => {
+    try {
+      const data = JSON.parse(event.nativeEvent.data);
+      if (data.type === 'success') {
+        onSuccess({
+          paymentId: data.razorpay_payment_id,
+          orderId:   data.razorpay_order_id || null,
+          signature: data.razorpay_signature || null,
+          method:    method,
+        });
+      } else if (data.type === 'cancel' || data.type === 'failed') {
+        onCancel(data.description || 'Payment cancelled');
+      }
+    } catch (e) { console.log('Razorpay msg parse error:', e.message); }
+  };
+
+  // Razorpay public test key fallback (NOT a real key — just a placeholder
+  // to avoid blank checkout if Firestore config is missing). Real key MUST
+  // come from app_config/payment.razorpay_key_id in Firestore.
+  const keyId = (payConfig && payConfig.razorpay_key_id) || '';
+  const themeColor = (payConfig && payConfig.theme_color) || '#C8541A';
+  const amountPaise = Math.round(amount * 100);  // Razorpay needs amount in paise
+
+  // Razorpay Checkout HTML — runs in WebView, calls postMessage on result
+  const checkoutHtml = `<!DOCTYPE html>
+<html>
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+<style>
+  body { margin:0; font-family:-apple-system,sans-serif; background:#FEFCF8; }
+  .loader { display:flex; align-items:center; justify-content:center; height:100vh; flex-direction:column; }
+  .spinner { border:3px solid #f3f3f3; border-top:3px solid ${themeColor}; border-radius:50%; width:40px; height:40px; animation:spin 1s linear infinite; }
+  @keyframes spin { 0%{transform:rotate(0deg);} 100%{transform:rotate(360deg);} }
+  .err { padding:20px; color:#a00; text-align:center; }
+</style>
+</head>
+<body>
+<div class="loader" id="loader">
+  <div class="spinner"></div>
+  <p style="margin-top:14px; color:#9D6A47;">Opening secure payment…</p>
+</div>
+<div class="err" id="err" style="display:none;"></div>
+<script>
+function post(obj){
+  if(window.ReactNativeWebView && window.ReactNativeWebView.postMessage){
+    window.ReactNativeWebView.postMessage(JSON.stringify(obj));
+  }
+}
+try {
+  ${keyId ? '' : "document.getElementById('loader').style.display='none'; document.getElementById('err').innerHTML='Payment is being configured. Please try again in a few minutes or pay by Cash on Delivery.'; document.getElementById('err').style.display='block'; throw new Error('No Razorpay key configured');"}
+  const options = {
+    key: ${JSON.stringify(keyId)},
+    amount: ${amountPaise},
+    currency: 'INR',
+    name: 'VEGA Home Services',
+    description: 'Service booking payment',
+    image: 'https://img.icons8.com/3d-fluency/256/lotus.png',
+    handler: function(response) {
+      post({ type:'success',
+        razorpay_payment_id: response.razorpay_payment_id,
+        razorpay_order_id: response.razorpay_order_id,
+        razorpay_signature: response.razorpay_signature
+      });
+    },
+    modal: {
+      ondismiss: function() { post({ type:'cancel' }); },
+      confirm_close: true,
+      escape: false
+    },
+    prefill: {
+      name: ${JSON.stringify((customer && customer.name) || '')},
+      contact: ${JSON.stringify((customer && customer.phone) || '')},
+      email: ${JSON.stringify((customer && customer.email) || '')}
+    },
+    notes: { app: 'VEGA Customer' },
+    theme: { color: ${JSON.stringify(themeColor)} },
+    method: { ${method === 'upi' ? 'upi:true' : method === 'card' ? 'card:true' : method === 'netbanking' ? 'netbanking:true' : 'upi:true, card:true, netbanking:true, wallet:true'} }
+  };
+  const rzp = new Razorpay(options);
+  rzp.on('payment.failed', function(response) {
+    post({ type:'failed', code:response.error.code, description:response.error.description });
+  });
+  rzp.open();
+} catch(e) {
+  console.log('Razorpay init error:', e);
+}
+</script>
+</body>
+</html>`;
+
   return (
-    <Modal visible={visible} transparent animationType="fade">
-      <View style={{flex:1,backgroundColor:'rgba(0,0,0,0.65)',alignItems:'center',justifyContent:'center',padding:32}}>
-        <View style={{backgroundColor:'#FFF',borderRadius:24,padding:32,width:'100%',alignItems:'center',shadowColor:'#000',shadowOpacity:0.25,shadowRadius:20,elevation:12}}>
-          {step===0?(
-            <>
-              <ActivityIndicator size="large" color="#F97316" style={{marginBottom:18}}/>
-              <Text style={{fontWeight:'700',fontSize:17,color:'#18080A',marginBottom:6}}>Processing Payment…</Text>
-              <Text style={{color:'#9D6A47',fontSize:14}}>₹{amount} via {label}</Text>
-              <Text style={{color:'#C4A07A',fontSize:11,marginTop:10}}>Please do not press back</Text>
-            </>
-          ):(
-            <>
-              <View style={{width:68,height:68,borderRadius:34,backgroundColor:'#DCFCE7',alignItems:'center',justifyContent:'center',marginBottom:16}}>
-                <Text style={{fontSize:34}}>✓</Text>
-              </View>
-              <Text style={{fontWeight:'800',fontSize:19,color:'#18080A',marginBottom:4}}>Payment Successful!</Text>
-              <Text style={{color:'#4A8A2A',fontSize:14,marginBottom:26}}>₹{amount} paid via {label}</Text>
-              <TouchableOpacity onPress={onSuccess}
-                style={{backgroundColor:'#F97316',paddingHorizontal:36,paddingVertical:15,borderRadius:28,shadowColor:'#F97316',shadowOpacity:0.45,shadowRadius:8,elevation:6}}>
-                <Text style={{color:'#FFF',fontWeight:'700',fontSize:16}}>Continue to Booking →</Text>
-              </TouchableOpacity>
-            </>
-          )}
+    <Modal visible={visible} animationType="slide" onRequestClose={() => onCancel('Closed by user')}>
+      <SafeAreaView style={{flex:1, backgroundColor:'#FEFCF8'}}>
+        <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center',padding:14,borderBottomWidth:0.5,borderBottomColor:'#E8DDD4'}}>
+          <Text style={{fontWeight:'700',fontSize:16,color:'#18080A'}}>🔒 Secure Payment</Text>
+          <TouchableOpacity onPress={() => onCancel('Closed by user')} style={{padding:6}}>
+            <Text style={{fontSize:18,color:'#9D6A47'}}>✕</Text>
+          </TouchableOpacity>
         </View>
-      </View>
+        {visible && (
+          <WebView
+            source={{ html: checkoutHtml }}
+            originWhitelist={['*']}
+            javaScriptEnabled
+            domStorageEnabled
+            mixedContentMode="always"
+            onMessage={handleMessage}
+            startInLoadingState
+            style={{flex:1}}
+          />
+        )}
+      </SafeAreaView>
     </Modal>
   );
 };
@@ -905,6 +989,17 @@ export default function App() {
   const [pendingAddr,   setPendingAddr]   = useState(null);  // address pending save
   const [addrLabel,     setAddrLabel]     = useState('Home'); // label for save modal
   const [editingAddrId, setEditingAddrId] = useState(null);  // for edit mode
+
+  // ── Razorpay config state (loaded from Firestore app_config/payment) ──
+  // Admin updates this doc in Firebase Console to swap test↔live keys
+  // without any code change or build. Read once on mount + on re-login.
+  const [payConfig, setPayConfig] = useState({
+    razorpay_key_id: '',          // Razorpay public test key — admin sets in Firebase Console
+    razorpay_mode: 'test',        // 'test' or 'live' (for logging/UI hint only)
+    theme_color: '#C8541A',
+  });
+  const [showRazorpay, setShowRazorpay] = useState(false);
+  const [pendingPayMethod, setPendingPayMethod] = useState(null);
 
   // ── Bug 4: Multi-date scheduling state ──────────────────────────
   // Array of YYYY-MM-DD strings — when scheduled mode, customer picks multiple dates
@@ -1016,6 +1111,29 @@ export default function App() {
     setLandmark(def.landmark || '');
     if (def.area) setSelArea(def.area);
   }, [screen, savedAddrs.length]);
+
+  // ── Razorpay config listener (Firestore app_config/payment) ──────────
+  // Live updates when admin changes the key in Firebase Console.
+  useEffect(() => {
+    const unsub = firestore().collection('app_config').doc('payment')
+      .onSnapshot(
+        doc => {
+          if (doc.exists) {
+            const data = doc.data() || {};
+            setPayConfig(prev => ({
+              razorpay_key_id: data.razorpay_key_id || prev.razorpay_key_id || '',
+              razorpay_mode:   data.razorpay_mode   || 'test',
+              theme_color:     data.theme_color     || '#C8541A',
+            }));
+            console.log('Razorpay config loaded:', data.razorpay_mode || 'test');
+          } else {
+            console.log('app_config/payment not yet configured in Firebase Console');
+          }
+        },
+        err => console.log('payConfig listener error:', err.message)
+      );
+    return () => unsub();
+  }, []);
 
   // ── Live worker location listener ─────────────────────────────────
   useEffect(()=>{
@@ -1306,11 +1424,47 @@ export default function App() {
 
   // Intercepts non-cash payments to show mock payment modal before booking
   const handleConfirmBooking = () => {
+    // Cash on Delivery → skip payment gateway
     if (selPayMethod === 'cash') { placeOrder(); return; }
-    setShowPayModal(true);
+    // Validate Razorpay config is loaded before opening checkout
+    if (!payConfig.razorpay_key_id) {
+      Alert.alert(
+        'Payment Not Configured',
+        'Online payment is being set up. Please choose "Cash" for now or try again in a few minutes.',
+        [{ text: 'OK' }]
+      );
+      return;
+    }
+    // Validate address before opening Razorpay (same as placeOrder validations)
+    if (cart.length === 0) { Alert.alert('Cart Empty', 'Please add a service first'); return; }
+    if (!flat || flat.trim().length === 0) { Alert.alert('Address Required', 'Please enter your flat / house number'); return; }
+    if (!selArea) { Alert.alert('Area Required', 'Please pick your service area'); return; }
+    if (bookMode === 'scheduled' && (!selTime || selDatesMulti.length === 0)) {
+      Alert.alert('Schedule Required', 'Please pick at least one date and a time'); return;
+    }
+    if (bookMode === 'subscription' && (!subStartDate || !subEndDate || subDays.length === 0 || !selTime)) {
+      Alert.alert('Subscription Incomplete', 'Please complete the subscription details'); return;
+    }
+    setPendingPayMethod(selPayMethod);
+    setShowRazorpay(true);
   };
 
-  const placeOrder = async()=>{
+  // Called by RazorpayCheckoutModal on payment.success
+  const handleRazorpaySuccess = (payment) => {
+    setShowRazorpay(false);
+    // Pass payment metadata into placeOrder so it gets saved on the booking doc
+    placeOrder({ razorpayPaymentId: payment.paymentId, razorpaySignature: payment.signature, paymentGateway: 'razorpay' });
+  };
+
+  // Called by RazorpayCheckoutModal on payment.failed or cancel
+  const handleRazorpayCancel = (reason) => {
+    setShowRazorpay(false);
+    if (reason && reason !== 'Closed by user' && reason !== 'Payment cancelled') {
+      Alert.alert('Payment Failed', reason);
+    }
+  };
+
+  const placeOrder = async(paymentInfo = null)=>{
     if(!user){Alert.alert('Login Required','',[ {text:'Login',onPress:()=>setScreen('login')} ]);return;}
     // Validate per mode
     if(bookMode==='scheduled'){
@@ -1469,6 +1623,11 @@ export default function App() {
         },
         paymentMethod: selPayMethod,
         paymentStatus: selPayMethod==='cash'?'pending':'paid',
+        // Razorpay payment metadata (when paid online)
+        paymentGateway: paymentInfo?.paymentGateway || (selPayMethod==='cash' ? null : 'razorpay'),
+        razorpayPaymentId: paymentInfo?.razorpayPaymentId || null,
+        razorpaySignature: paymentInfo?.razorpaySignature || null,
+        razorpayMode: payConfig.razorpay_mode || 'test',
       };
 
       const result = await createBooking(bookingData);
@@ -2692,11 +2851,14 @@ export default function App() {
           </TouchableOpacity>
           <View style={{height:40}}/>
         </ScrollView>
-        <MockPayModal
-          visible={showPayModal}
+        <RazorpayCheckoutModal
+          visible={showRazorpay}
           amount={finalTotal}
-          method={selPayMethod}
-          onSuccess={()=>{ setShowPayModal(false); placeOrder(); }}
+          method={pendingPayMethod || selPayMethod}
+          customer={{ name: user?.name || '', phone: phone || '' }}
+          payConfig={payConfig}
+          onSuccess={handleRazorpaySuccess}
+          onCancel={handleRazorpayCancel}
         />
       </SafeAreaView>
     );
