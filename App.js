@@ -331,7 +331,7 @@ const SERVICES = [
   { id:'home',    name:'Home\nCleaning',  shortName:'Home Cleaning',   icon:'🏠', gradient:['#FF6B35','#C8541A'], shadow:'rgba(200,84,26,0.4)',  iconBg:'#FF8B55', tagline:'Sweeping, mopping & full home clean',       workerLabel:'Cleaners',    badge:'Most Booked',
     durations:[
       { id:'fm_ut', label:'Floor + Mop + Utensils', price:99, mrp:250, popular:true, badge:'MOST BOOKED',
-        tasks:['Sweeping all rooms','Wet mopping all floors','Washing all utensils','Kitchen sink quick wipe'],
+        tasks:['Sweeping all rooms','Wet mopping all floors','Cleaning all utensils','Kitchen sink quick wipe'],
         note:'Daily favourite — covers floors + utensils in one visit' },
       { id:'fm',    label:'Floor + Mop',              price:89, mrp:149, popular:false,
         tasks:['Sweeping all rooms','Wet mopping all floors','Surface dust on tables'],
@@ -546,28 +546,28 @@ const AREAS=['Madhurawada','Rushikonda','MVP Colony','Dwaraka Nagar','Kommadi','
 
 // ── INDIVIDUAL TASK CARDS (Pronto-style, tap + to add multiple) ──
 const TASKS = [
-  {id:'t_fan', name:'Fan Cleaning', price:25, mrp:75, icon:'🌀', color:'#4A98E8', desc:'Per ceiling fan cleaned', unit:'fan',
+  {id:'t_fan', name:'Fan Cleaning', price:25, mrp:49, icon:'🌀', color:'#4A98E8', desc:'Per ceiling fan cleaned', unit:'fan',
     includes:['Dust removal from fan blades','Wiping blade surfaces with damp cloth','Cleaning fan motor housing exterior','Wiping visible light fixtures attached','Basic polish for a clean finish'],
     excludes:['Electrical rewiring or motor repair','Dismantling fan for deep clean','Removing blades from shaft','Work on fans above 12 feet height','Replacing bulbs or capacitors']},
   {id:'t_fridge', name:'Fridge Cleaning', price:149, mrp:249, icon:'❄️', color:'#4A98E8', desc:'Interior + exterior clean', unit:'fridge',
     includes:['Switching off fridge safely before work','Removing all food items aside carefully','Cleaning shelves, trays, drawers, door bins','Wiping inner walls and rubber door lining','Basic deodorising of fridge interior','Cleaning exterior front and side panels','Replacing food items neatly back'],
     excludes:['Moving or lifting the refrigerator','Cleaning back panel or condenser coils','Repair or servicing of the fridge','Deep freezer defrosting (takes hours)','Disposing garbage outside the home','Handling meat or raw seafood for hygiene']},
-  {id:'t_pack', name:'Packing or Unpacking', price:49, mrp:125, icon:'📦', color:'#1E6B3A', desc:'Organise clothes, kitchen & more', unit:'session',
+  {id:'t_pack', name:'Packing or Unpacking', price:49, mrp:89, icon:'📦', color:'#1E6B3A', desc:'Organise clothes, kitchen & more', unit:'session',
     includes:['Packing or unpacking clothes, shoes, linens','Packing or unpacking kitchen items and groceries','Folding and organising items before packing','Placing items into boxes, suitcases, cupboards','Labelling boxes (room-wise or item-wise)','Light dusting before placing items back','Basic organisation using existing storage'],
     excludes:['Heavy lifting or moving of furniture','Carrying boxes up or down stairs','Handling jewellery, cash, documents, valuables','Packing fragile antiques or artwork','Furniture dismantling or assembly']},
-  {id:'t_kprep', name:'Kitchen Prep', price:49, mrp:125, icon:'🥘', color:'#E88040', desc:'Veggie chop, meat marinate, salad prep', unit:'session',
+  {id:'t_kprep', name:'Kitchen Prep', price:49, mrp:89, icon:'🥘', color:'#E88040', desc:'Veggie chop, meat marinate, salad prep', unit:'session',
     includes:['Vegetable chopping and salad preparation','Meat marination as per your instructions','Serving food to family members','Basic mise-en-place (preparation before cooking)','Washing vegetables thoroughly before prep'],
     excludes:['Cooking full meals from scratch','Specialised cuisine preparation','Handling raw seafood or exotic meats','Baking or dessert preparation','Storing prepared food for long-term']},
-  {id:'t_dust', name:'Dusting & Wiping', price:49, mrp:125, icon:'🧹', color:'#9860E0', desc:'Shelves, furniture, tables, decor', unit:'session',
+  {id:'t_dust', name:'Dusting & Wiping', price:49, mrp:89, icon:'🧹', color:'#9860E0', desc:'Shelves, furniture, tables, decor', unit:'session',
     includes:['Dusting shelves and furniture surfaces','Wiping counters, tables, and decor items','Cleaning window sills and grills (reachable)','Removing accessible cobwebs','Wiping appliance exteriors'],
     excludes:['Dusting ceilings or very high areas','Using unstable stools or ladders','Handling chandeliers or fragile items','Cleaning exterior grills or outside windows','Stain removal or restoration work']},
-  {id:'t_iron', name:'Ironing & Folding', price:25, mrp:125, icon:'👔', color:'#9860E0', desc:'Per 10 clothes ironed & folded', unit:'set of 10',
+  {id:'t_iron', name:'Ironing & Folding', price:25, mrp:49, icon:'👔', color:'#9860E0', desc:'Per 10 clothes ironed & folded', unit:'set of 10',
     includes:['Sorting clothes for ironing','Ironing regular daily wear clothes','Folding clothes neatly after ironing','Arranging clothes in stacks','Basic tidying of ironing area after work'],
     excludes:['Ironing delicate silks or expensive fabrics','Handling biohazard-stained clothes','Cleaning the washing machine or iron','Advanced stain treatment','Hand washing bed sheets or footwear']},
-  {id:'t_window', name:'Window Cleaning', price:25, mrp:125, icon:'🪟', color:'#2C88D9', desc:'Per window — streak-free shine', unit:'window',
+  {id:'t_window', name:'Window Cleaning', price:25, mrp:49, icon:'🪟', color:'#2C88D9', desc:'Per window — streak-free shine', unit:'window',
     includes:['Inside glass wipe — streak-free finish','Window sill cleaning','Grill dust removal (reachable)','Window frame wiping','Final polish with dry cloth'],
     excludes:['Outside glass of high-floor windows','Work requiring ladders or safety harness','Broken glass replacement or repair','Cleaning curtains or blinds','Exterior grill painting or restoration']},
-  {id:'t_utensils', name:'Utensils Washing', price:49, mrp:99, icon:'🍽️', color:'#E88040', desc:'All utensils washed & dried', unit:'session',
+  {id:'t_utensils', name:'Utensils Cleaning', price:49, mrp:99, icon:'🍽️', color:'#E88040', desc:'All utensils cleaned & dried', unit:'session',
     includes:[
       'Scrubbing and cleaning all utensils (plates, cups, bowls, glasses)',
       'Scrubbing pots, pans, pressure cookers, kadai',
@@ -609,9 +609,9 @@ const HOME_PACKAGES = [
     name:'Floor Cleaning + Wet Mopping + Utensils',
     icon:'https://img.icons8.com/3d-fluency/128/broom.png',
     emoji:'🧹',
-    desc:'Sweeping all rooms, wet mopping all floors, washing all utensils and dishes, cleaning sink',
+    desc:'Sweeping all rooms, wet mopping all floors, cleaning all utensils and dishes, cleaning sink',
     mrp:250, price:99, popular:true, badge:'MOST BOOKED', color:'#C8541A', canSubscribe:true,
-    includes:['Sweeping all rooms','Wet mopping all floors','Washing all utensils and dishes','Cleaning kitchen sink thoroughly','Leaving sink area clean and dry'],
+    includes:['Sweeping all rooms','Wet mopping all floors','Cleaning all utensils and dishes','Cleaning kitchen sink thoroughly','Leaving sink area clean and dry'],
   },
   { id:'hp2',
     name:'Floor Cleaning + Wet Mopping',
@@ -625,9 +625,9 @@ const HOME_PACKAGES = [
     name:'Utensils Cleaning Only',
     icon:'https://img.icons8.com/3d-fluency/128/dishwasher.png',
     emoji:'🍽️',
-    desc:'Washing all utensils, scrubbing pots and pans, cleaning sink, leaving sink area dry',
+    desc:'Cleaning all utensils, scrubbing pots and pans, cleaning sink, leaving sink area dry',
     mrp:99, price:59, popular:false, badge:null, color:'#E87030', canSubscribe:false,
-    includes:['Washing all utensils (plates, cups, bowls, glasses)','Scrubbing pots, pans, pressure cooker, kadai','Cleaning kitchen sink thoroughly','Leaving sink area clean and completely dry','Cleaning dishes left soaking'],
+    includes:['Cleaning all utensils (plates, cups, bowls, glasses)','Scrubbing pots, pans, pressure cooker, kadai','Cleaning kitchen sink thoroughly','Leaving sink area clean and completely dry','Cleaning dishes left soaking'],
   },
   { id:'hp4',
     name:'Basic Kitchen Cleaning',
@@ -990,6 +990,10 @@ export default function App() {
   const [addrLabel,     setAddrLabel]     = useState('Home'); // label for save modal
   const [editingAddrId, setEditingAddrId] = useState(null);  // for edit mode
 
+  // ── Issue 6: Customer name edit state ────────────────────────────────
+  const [showNameModal, setShowNameModal] = useState(false);
+  const [nameInput, setNameInput]         = useState('');
+
   // ── Razorpay config state (loaded from Firestore app_config/payment) ──
   // Admin updates this doc in Firebase Console to swap test↔live keys
   // without any code change or build. Read once on mount + on re-login.
@@ -1112,9 +1116,20 @@ export default function App() {
     if (def.area) setSelArea(def.area);
   }, [screen, savedAddrs.length]);
 
-  // ── Razorpay config listener (Firestore app_config/payment) ──────────
-  // Live updates when admin changes the key in Firebase Console.
+  // ── Issue 6: Auto-prompt for name on first login if user has default 'Customer' ──
   useEffect(() => {
+    if (user && user.name === 'Customer' && screen === 'main' && !showNameModal) {
+      const t = setTimeout(() => { setNameInput(''); setShowNameModal(true); }, 1500);
+      return () => clearTimeout(t);
+    }
+  }, [user?.name, screen]);
+
+  // ── Razorpay config listener (Firestore app_config/payment) ──────────
+  // Bug fix: depend on `user` so listener re-attaches AFTER login (Firestore
+  // rules require auth — listener at mount-time gets permission denied
+  // and never delivers data, even if user later logs in).
+  useEffect(() => {
+    if (!user) return;  // wait for login before reading auth-protected config
     const unsub = firestore().collection('app_config').doc('payment')
       .onSnapshot(
         doc => {
@@ -1125,15 +1140,15 @@ export default function App() {
               razorpay_mode:   data.razorpay_mode   || 'test',
               theme_color:     data.theme_color     || '#C8541A',
             }));
-            console.log('Razorpay config loaded:', data.razorpay_mode || 'test');
+            console.log('[Razorpay] config loaded — mode:', data.razorpay_mode, 'key prefix:', (data.razorpay_key_id || '').slice(0, 12));
           } else {
-            console.log('app_config/payment not yet configured in Firebase Console');
+            console.log('[Razorpay] app_config/payment doc missing — admin to create in Firebase Console');
           }
         },
-        err => console.log('payConfig listener error:', err.message)
+        err => console.log('[Razorpay] payConfig listener error:', err.message, '— check Firestore rules')
       );
     return () => unsub();
-  }, []);
+  }, [user?.phone]);
 
   // ── Live worker location listener ─────────────────────────────────
   useEffect(()=>{
@@ -1208,7 +1223,8 @@ export default function App() {
   const recurBase = baseBeforeDisc - subscriptionDiscount;
   const promoSave   = appliedPromo?appliedPromo.type==='pct'?Math.round(recurBase*appliedPromo.val/100):appliedPromo.val:0;
   const walletSave  = useWallet?Math.min(wallet,recurBase-promoSave):0;
-  const finalTotal  = Math.max(0,recurBase-promoSave-walletSave)+29;
+  // VEGA employs workers directly — no platform fee added (Issue 1 fix)
+  const finalTotal  = Math.max(0,recurBase-promoSave-walletSave);
 
   // Legacy aliases for older code references
   const recurVisits = totalVisits;
@@ -1423,14 +1439,34 @@ export default function App() {
   };
 
   // Intercepts non-cash payments to show mock payment modal before booking
-  const handleConfirmBooking = () => {
+  const handleConfirmBooking = async () => {
     // Cash on Delivery → skip payment gateway
     if (selPayMethod === 'cash') { placeOrder(); return; }
-    // Validate Razorpay config is loaded before opening checkout
-    if (!payConfig.razorpay_key_id) {
+    // Validate Razorpay config — if not loaded yet, try a one-shot fetch
+    // (handles the case where the listener hasn't received data yet).
+    let keyId = payConfig.razorpay_key_id;
+    if (!keyId) {
+      try {
+        const doc = await firestore().collection('app_config').doc('payment').get();
+        if (doc.exists) {
+          const data = doc.data() || {};
+          keyId = data.razorpay_key_id || '';
+          if (keyId) {
+            setPayConfig({
+              razorpay_key_id: keyId,
+              razorpay_mode: data.razorpay_mode || 'test',
+              theme_color: data.theme_color || '#C8541A',
+            });
+          }
+        }
+      } catch (e) {
+        console.log('[Razorpay] eager fetch error:', e.message);
+      }
+    }
+    if (!keyId) {
       Alert.alert(
         'Payment Not Configured',
-        'Online payment is being set up. Please choose "Cash" for now or try again in a few minutes.',
+        'Online payment is being set up. Please choose "Cash" for now or try again in a few minutes.\n\nDebug: Check Firebase Console → Firestore → app_config/payment → razorpay_key_id field exists with rzp_test_* value.',
         [{ text: 'OK' }]
       );
       return;
@@ -1588,7 +1624,7 @@ export default function App() {
         promoDiscount: promoSave||0,
         walletUsed: walletSave||0,
         subscriptionDiscount: subscriptionDiscount || 0,    // Bug 5: 10% off if subscription
-        platformFee: 29,
+        platformFee: 0,                                      // Issue 1 fix: VEGA has no platform fee
         slot,
         bookingMode: bookMode,                              // 'instant' | 'scheduled' | 'subscription'
         // Bug 5: Subscription fields
@@ -2825,9 +2861,17 @@ export default function App() {
           <Card style={{marginBottom:12}}>
             <Text style={{fontWeight:'700',color:C.text,fontSize:14,marginBottom:12}}>Bill Details</Text>
             {cart.map((i,idx)=><BR key={idx} l={i.name} r={`₹${i.price}`}/>)}
+            {/* ── Issue 5: Subscription math clarity ─────────────────────── */}
+            {bookMode==='subscription' && subVisits > 1 && (
+              <BR l={`× ${subVisits} visits`} r={`₹${cartTotal * subVisits}`} rc={C.teal}/>
+            )}
+            {bookMode==='scheduled' && selDatesMulti.length > 1 && (
+              <BR l={`× ${selDatesMulti.length} visits`} r={`₹${cartTotal * selDatesMulti.length}`} rc={C.orange}/>
+            )}
+            {subscriptionDiscount > 0 && <BR l="Subscription discount (10%)" r={`–₹${subscriptionDiscount}`} rc={C.green}/>}
             {promoSave>0&&<BR l="Promo discount" r={`–₹${promoSave}`} rc={C.green}/>}
             {walletSave>0&&<BR l="Wallet used" r={`–₹${walletSave}`} rc={C.gold}/>}
-            <BR l="Platform fee" r="₹29"/>
+            {/* Issue 1 fix: NO platform fee — VEGA employs workers directly */}
             <View style={{height:1,backgroundColor:C.border,marginVertical:10}}/>
             <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center'}}>
               <Text style={{fontWeight:'800',fontSize:16,color:C.text}}>Total Payable</Text>
@@ -2860,6 +2904,38 @@ export default function App() {
           onSuccess={handleRazorpaySuccess}
           onCancel={handleRazorpayCancel}
         />
+        {/* Issue 6: Name edit modal */}
+        <Modal visible={showNameModal} transparent animationType="fade">
+          <View style={{flex:1,backgroundColor:'rgba(0,0,0,0.6)',justifyContent:'center',padding:24}}>
+            <View style={{backgroundColor:'#FFF',borderRadius:20,padding:24}}>
+              <Text style={{fontWeight:'700',fontSize:18,color:C.text,marginBottom:6}}>What should we call you?</Text>
+              <Text style={{color:C.muted,fontSize:13,marginBottom:14}}>Your name appears on bookings and helps our workers serve you better.</Text>
+              <TextInput
+                style={{borderWidth:1,borderColor:C.border,borderRadius:14,padding:14,fontSize:15,color:C.text,marginBottom:14}}
+                placeholder="Your name"
+                value={nameInput}
+                onChangeText={setNameInput}
+                autoFocus
+              />
+              <View style={{flexDirection:'row',gap:10}}>
+                <TouchableOpacity style={{flex:1,padding:14,borderRadius:14,borderWidth:1,borderColor:C.border,alignItems:'center'}} onPress={()=>setShowNameModal(false)}>
+                  <Text style={{color:C.muted,fontWeight:'600'}}>Later</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={{flex:1,padding:14,borderRadius:14,backgroundColor:C.orange,alignItems:'center'}} onPress={async()=>{
+                  const n = nameInput.trim();
+                  if (n.length < 2) { Alert.alert('Name too short','Please enter at least 2 characters'); return; }
+                  if (user && phone) {
+                    await createOrUpdateUser(phone, { name: n });
+                    setUser(u => u ? { ...u, name: n } : u);
+                  }
+                  setShowNameModal(false);
+                }}>
+                  <Text style={{color:'#FFF',fontWeight:'700'}}>Save</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
       </SafeAreaView>
     );
   }
@@ -3336,7 +3412,18 @@ export default function App() {
         <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center',marginBottom:14}}>
           <View>
             <Text style={{fontSize:12,color:C.muted,marginBottom:2}}>📍 {selArea}, Vizag</Text>
-            <DText style={{fontSize:22,fontWeight:'700',color:C.text}}>{user?`Hello, ${user.name.split(' ')[0]} 🪷`:'Hello, Guest 🪷'}</DText>
+            <TouchableOpacity onPress={()=>{
+              if(!user) return;
+              setNameInput(user.name === 'Customer' ? '' : user.name);
+              setShowNameModal(true);
+            }}>
+              <DText style={{fontSize:22,fontWeight:'700',color:C.text}}>
+                {user?`Hello, ${user.name.split(' ')[0]} 🪷`:'Hello, Guest 🪷'}
+              </DText>
+              {user && user.name === 'Customer' && (
+                <Text style={{fontSize:11,color:C.orange,marginTop:2}}>👆 Tap to set your name</Text>
+              )}
+            </TouchableOpacity>
           </View>
           <View style={{flexDirection:'row',gap:10,alignItems:'center'}}>
             {user&&(
@@ -3555,7 +3642,7 @@ export default function App() {
         <View style={{backgroundColor:C.darkCard,padding:20,flexDirection:'row',alignItems:'center',borderWidth:0.5,borderColor:C.darkBd}}>
           <View style={{flex:1}}>
             <Badge label="PREMIUM" color={C.gold2} style={{marginBottom:8}}/>
-            <DText style={{fontSize:18,fontWeight:'700',color:'#FFF',marginBottom:4}}>Subscribe & Save 40%</DText>
+            <DText style={{fontSize:18,fontWeight:'700',color:'#FFF',marginBottom:4}}>Subscribe & Save 10%</DText>
             <Text style={{fontSize:12,color:'rgba(255,255,255,0.6)',lineHeight:18}}>Daily, weekly or monthly home care plans</Text>
           </View>
           <TouchableOpacity style={{backgroundColor:C.gold2,paddingHorizontal:14,paddingVertical:10,borderRadius:20,...SHADOW.glow,shadowColor:C.gold}} onPress={()=>Alert.alert('Coming Soon! 🌟','VEGA subscription plans launching next month!')}>
@@ -4042,11 +4129,11 @@ export default function App() {
             ))}
             <Card style={{marginBottom:16}}>
               <BR l="Services total" r={`₹${cartTotal}`}/>
-              <BR l="Platform fee" r="₹29"/>
+              {/* Issue 1 fix: NO platform fee — VEGA employs workers directly */}
               <View style={{height:1,backgroundColor:C.border,marginVertical:8}}/>
               <View style={{flexDirection:'row',justifyContent:'space-between'}}>
                 <Text style={{fontWeight:'800',fontSize:16,color:C.text}}>Total</Text>
-                <DText style={{fontWeight:'700',fontSize:22,color:C.orange}}>₹{cartTotal+29}</DText>
+                <DText style={{fontWeight:'700',fontSize:22,color:C.orange}}>₹{cartTotal}</DText>
               </View>
             </Card>
             <TouchableOpacity style={[S.btn,{paddingVertical:18,borderRadius:30,...SHADOW.glow}]} onPress={()=>{if(!user){Alert.alert('Login Required','',[ {text:'Login',onPress:()=>setScreen('login')} ]);return;}setScreen('step4');}}>
