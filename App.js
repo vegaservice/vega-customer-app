@@ -129,14 +129,14 @@ const createBooking = async (bookingData) => {
     const orderId = 'VG' + Date.now().toString().slice(-6);
     const otp = Math.floor(1000 + Math.random() * 9000).toString();
     const booking = {
-      ...bookingData, orderId, otp, status: 'confirmed',
+      ...bookingData, orderId, otp, status: 'pending',
       createdAt: firestore.FieldValue.serverTimestamp(), rated: false,
     };
     await firestore().collection('bookings').doc(orderId).set(booking);
     if (bookingData.userId) {
       await firestore().collection('users').doc(bookingData.userId)
         .collection('bookings').doc(orderId)
-        .set({ orderId, status: 'confirmed', createdAt: firestore.FieldValue.serverTimestamp() });
+        .set({ orderId, status: 'pending', createdAt: firestore.FieldValue.serverTimestamp() });
     }
 
     // ── Change 3: Recurring child docs are NOT auto-created here.
@@ -1565,7 +1565,7 @@ export default function App() {
       setTimeout(()=>{
         const otp=Math.floor(1000+Math.random()*9000).toString();
         const oid='VG'+Date.now().toString().slice(-6);
-        const o={orderId:oid,otp,items:[...cart],total:finalTotal,slot,addr:fullAddr,status:'confirmed',time:new Date().toLocaleString('en-IN'),professional:pro,rated:false,bookingMode:bookMode,totalVisits};
+        const o={orderId:oid,otp,items:[...cart],total:finalTotal,slot,addr:fullAddr,status:'pending',time:new Date().toLocaleString('en-IN'),professional:pro,rated:false,bookingMode:bookMode,totalVisits};
         setOrders(p=>[o,...p]);
         if(useWallet&&walletSave>0) setWallet(w=>w-walletSave);
         resetForm();
@@ -1711,7 +1711,7 @@ export default function App() {
                 ...bookingData,
                 orderId: nextOrderId,
                 otp: Math.floor(1000 + Math.random() * 9000).toString(),
-                status: 'confirmed',
+                status: 'pending',
                 slot: nextSlot,
                 scheduledDate: dateStr,
                 visitNumber: visitIdx,
@@ -1752,7 +1752,7 @@ export default function App() {
         items: [...cart],
         total: finalTotal,
         slot, addr: fullAddr,
-        status: 'confirmed',
+        status: 'pending',
         time: new Date().toLocaleString('en-IN'),
         professional: pro,
         rated: false,
