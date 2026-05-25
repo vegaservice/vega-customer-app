@@ -77,10 +77,12 @@ service cloud.firestore {
       allow create, update, delete: if false;
     }
 
-    // ── APP CONFIG (promo codes, pricing, settings) ────────
+    // ── APP CONFIG (promo codes, payment public keys, settings) ────────
+    // PUBLIC READ — Razorpay key_id is a PUBLIC client identifier (safe to expose).
+    // Write is admin-only via Firebase Console (no app code writes here).
     match /app_config/{doc} {
-      allow read: if request.auth != null;
-      allow write: if false;   // Admin only (via console)
+      allow read: if true;
+      allow write: if false;
     }
 
     // ── AREAS (Vizag serviceable areas) ────────────────────

@@ -1125,30 +1125,38 @@ export default function App() {
   }, [user?.name, screen]);
 
   // ── Razorpay config listener (Firestore app_config/payment) ──────────
-  // Bug fix: depend on `user` so listener re-attaches AFTER login (Firestore
-  // rules require auth — listener at mount-time gets permission denied
-  // and never delivers data, even if user later logs in).
+  // Public-read rule now in place — listener runs on mount regardless of login.
+  // ALSO eager .get() runs immediately for fastest first-read.
   useEffect(() => {
-    if (!user) return;  // wait for login before reading auth-protected config
+    let cancelled = false;
+    const applyData = (data, source) => {
+      if (cancelled || !data) return;
+      const cleanKey = (data.razorpay_key_id || '').trim();
+      setPayConfig(prev => ({
+        razorpay_key_id: cleanKey || prev.razorpay_key_id || '',
+        razorpay_mode:   data.razorpay_mode   || 'test',
+        theme_color:     data.theme_color     || '#C8541A',
+      }));
+      console.log('[Razorpay]', source, '→ mode:', data.razorpay_mode, 'key len:', cleanKey.length, 'prefix:', cleanKey.slice(0, 14));
+    };
+    // 1) Eager fetch immediately on mount
+    firestore().collection('app_config').doc('payment').get()
+      .then(doc => {
+        if (doc.exists) applyData(doc.data(), 'eager-get');
+        else console.log('[Razorpay] eager-get: doc app_config/payment does not exist in Firestore');
+      })
+      .catch(e => console.log('[Razorpay] eager-get error:', e.code || e.message, '— Firestore rule may block read'));
+    // 2) Live listener for future changes
     const unsub = firestore().collection('app_config').doc('payment')
       .onSnapshot(
         doc => {
-          if (doc.exists) {
-            const data = doc.data() || {};
-            setPayConfig(prev => ({
-              razorpay_key_id: data.razorpay_key_id || prev.razorpay_key_id || '',
-              razorpay_mode:   data.razorpay_mode   || 'test',
-              theme_color:     data.theme_color     || '#C8541A',
-            }));
-            console.log('[Razorpay] config loaded — mode:', data.razorpay_mode, 'key prefix:', (data.razorpay_key_id || '').slice(0, 12));
-          } else {
-            console.log('[Razorpay] app_config/payment doc missing — admin to create in Firebase Console');
-          }
+          if (doc.exists) applyData(doc.data(), 'snapshot');
+          else console.log('[Razorpay] snapshot: doc does not exist');
         },
-        err => console.log('[Razorpay] payConfig listener error:', err.message, '— check Firestore rules')
+        err => console.log('[Razorpay] listener error:', err.code || err.message)
       );
-    return () => unsub();
-  }, [user?.phone]);
+    return () => { cancelled = true; unsub(); };
+  }, []);  // runs once on mount; eager fetch handles auth=null case (rules are public-read now)
 
   // ── Live worker location listener ─────────────────────────────────
   useEffect(()=>{
@@ -3423,6 +3431,10 @@ export default function App() {
               {user && user.name === 'Customer' && (
                 <Text style={{fontSize:11,color:C.orange,marginTop:2}}>👆 Tap to set your name</Text>
               )}
+              {/* Razorpay debug indicator — small text, only visible when OTA-2025-A is live */}
+              <Text style={{fontSize:9,color:C.muted2,marginTop:2}}>
+                OTA-2025-A · 💳 {payConfig.razorpay_key_id ? `Razorpay ${payConfig.razorpay_mode} (${payConfig.razorpay_key_id.slice(0,10)}...)` : 'Razorpay NOT LOADED'}
+              </Text>
             </TouchableOpacity>
           </View>
           <View style={{flexDirection:'row',gap:10,alignItems:'center'}}>
