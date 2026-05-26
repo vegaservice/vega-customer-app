@@ -1552,7 +1552,10 @@ export default function App() {
     if(!flat || flat.trim().length===0){Alert.alert('Address Required','Please enter your flat / house number');return;}
     if(!selArea){Alert.alert('Area Required','Please pick your service area');return;}
     setPlacing(true);
-    const pro=PROFESSIONALS[Math.floor(Math.random()*PROFESSIONALS.length)];
+    // SYNC FIX: No random fake professional. assignedWorkerName/professional
+    // stay null until Hub Manager or worker self-accept assigns. UI shows
+    // "Finding a professional..." until real assignment happens.
+    const pro = { id: null, name: null, phone: null, rating: null, photo: null };
     const fullAddr = [flat, buildingName, streetName, landmark, selArea, 'Vizag'].filter(Boolean).join(', ');
     const _fmtDate = calSelDate
       ? calSelDate.toLocaleDateString('en-IN',{weekday:'short',day:'numeric',month:'short'})
@@ -1592,20 +1595,11 @@ export default function App() {
     // Production path — save to Firestore
     const bookingMode = bookMode; // alias for Firestore field
     try{
-      // Fetch best available worker
-      let pro = PROFESSIONALS[Math.floor(Math.random()*PROFESSIONALS.length)];
-      try {
-        const wSnap = await firestore().collection('workers')
-          .where('isAvailable','==',true)
-          .where('status','==','active')
-          .where('role','==','worker')
-          .limit(3).get();
-        if(!wSnap.empty) {
-          const ws = wSnap.docs.map(d=>({id:d.id,...d.data()}));
-          const best = ws.sort((a,b)=>(b.ratingAvg||4)-(a.ratingAvg||4))[0];
-          pro = {id:best.id,name:best.name,phone:best.phone,rating:best.ratingAvg||4.9,initial:(best.name||'V')[0],color:'#C8541A',badge:'VEGA Pro'};
-        }
-      } catch(e){ console.log('Worker fetch:',e); }
+      // SYNC FIX: NO professional auto-picked. Booking starts with no worker.
+      // Hub Manager assigns OR a free worker self-accepts via the Available
+      // Jobs tab. Customer track screen shows "Finding a professional..."
+      // until assignedWorkerName is populated.
+      let pro = { id: null, name: null, phone: null, rating: null, photo: null };
 
       // ── Bug 5: Determine first visit date based on mode ──
       // FIX: Use DATES[i].iso field directly (added to getDates) — avoids
@@ -3209,7 +3203,24 @@ export default function App() {
   }
 
   if(screen==='track'&&trackOrd){
-    const pro=trackOrd.professional;
+    // SYNC FIX: Prefer the REAL assigned worker fields over the legacy
+    // `professional` object (which was a randomly-picked fake before).
+    // assignedWorkerName + assignedWorkerPhone are written by Hub Manager
+    // OR by worker self-accept transaction — single source of truth.
+    const assignedName  = trackOrd.assignedWorkerName  || trackOrd.professional?.name  || null;
+    const assignedPhone = trackOrd.assignedWorkerPhone || trackOrd.professional?.phone || null;
+    const assignedId    = trackOrd.assignedWorkerId    || trackOrd.professional?.id    || null;
+    const pro = assignedId ? {
+      id: assignedId,
+      name: assignedName,
+      phone: assignedPhone,
+      rating: trackOrd.professional?.rating || 4.8,
+      initial: (assignedName || 'V')[0],
+      color: trackOrd.professional?.color || '#C8541A',
+      badge: trackOrd.professional?.badge || 'VEGA Pro',
+      jobs: trackOrd.professional?.jobs || '—',
+      exp: trackOrd.professional?.exp || 'Verified pro',
+    } : null;
     return(
       <SafeAreaView style={{flex:1,backgroundColor:C.bg}}>
         <View style={S.topBar}>
@@ -3224,6 +3235,17 @@ export default function App() {
             <DText style={{fontSize:48,fontWeight:'700',color:C.orangeSoft,letterSpacing:12}}>{trackOrd.otp}</DText>
             <Text style={{color:'rgba(255,255,255,0.35)',fontSize:12,marginTop:10}}>Required to start service</Text>
           </View>
+          {!pro && (
+            <Card style={{marginBottom:12,backgroundColor:C.orangeBg,borderColor:C.orangeBd}}>
+              <View style={{flexDirection:'row',alignItems:'center',gap:12}}>
+                <ActivityIndicator color={C.orange}/>
+                <View style={{flex:1}}>
+                  <Text style={{fontWeight:'700',color:C.orange,fontSize:14}}>Finding a professional for you...</Text>
+                  <Text style={{color:C.muted,fontSize:11,marginTop:3}}>Our team is assigning a verified VEGA pro. You'll see their details here once assigned.</Text>
+                </View>
+              </View>
+            </Card>
+          )}
           {pro&&(
             <Card style={{marginBottom:12}}>
               <Text style={{fontSize:11,fontWeight:'700',color:C.orange,letterSpacing:1,marginBottom:12}}>YOUR PROFESSIONAL</Text>
