@@ -1451,14 +1451,19 @@ export default function App() {
     // Cash on Delivery → skip payment gateway
     if (selPayMethod === 'cash') { placeOrder(); return; }
     // Validate Razorpay config — if not loaded yet, try a one-shot fetch
-    // (handles the case where the listener hasn't received data yet).
+    // and show DETAILED diagnostic on failure so we can debug remotely.
     let keyId = payConfig.razorpay_key_id;
+    let diag = `state.key.len=${keyId ? keyId.length : 0}`;
     if (!keyId) {
       try {
         const doc = await firestore().collection('app_config').doc('payment').get();
+        diag += ` | get.exists=${doc.exists}`;
         if (doc.exists) {
           const data = doc.data() || {};
-          keyId = data.razorpay_key_id || '';
+          diag += ` | fields=[${Object.keys(data).join(',')}]`;
+          keyId = (data.razorpay_key_id || '').trim();
+          diag += ` | key.len=${keyId.length}`;
+          diag += ` | key.prefix="${keyId.slice(0, 14)}"`;
           if (keyId) {
             setPayConfig({
               razorpay_key_id: keyId,
@@ -1468,13 +1473,13 @@ export default function App() {
           }
         }
       } catch (e) {
-        console.log('[Razorpay] eager fetch error:', e.message);
+        diag += ` | ERR=${e.code || e.message || 'unknown'}`;
       }
     }
     if (!keyId) {
       Alert.alert(
         'Payment Not Configured',
-        'Online payment is being set up. Please choose "Cash" for now or try again in a few minutes.\n\nDebug: Check Firebase Console → Firestore → app_config/payment → razorpay_key_id field exists with rzp_test_* value.',
+        `Online payment failed to load. Choose "Cash" for now.\n\nDiagnostic (send this screenshot to support):\n${diag}\n\nExpected: fields=[razorpay_key_id,razorpay_mode,...] key.len=24+ prefix="rzp_test_..." or "rzp_live_..."`,
         [{ text: 'OK' }]
       );
       return;
