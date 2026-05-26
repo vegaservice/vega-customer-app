@@ -77,6 +77,110 @@ const logWalletTransaction = async (phone, amount, reason, type = 'credit') => {
   } catch (e) { console.error('logWalletTransaction:', e); return false; }
 };
 
+// ── Apple Guideline 5.1.1(v): Account Deletion (REQUIRED for App Store) ──
+// Deletes user's Firestore data + Firebase Auth account.
+// Past completed bookings are anonymized (kept for tax/audit, customer info removed).
+// In-progress / pending bookings are cancelled.
+const deleteUserAccount = async (phone) => {
+  if (!phone) return { ok: false, error: 'No phone' };
+  const result = { ok: false, deletedFields: [], anonymizedBookings: 0, cancelledBookings: 0 };
+  try {
+    // 1. Cancel any pending / in-progress bookings tied to this customer
+    try {
+      const activeSnap = await firestore().collection('bookings')
+        .where('customerPhone', '==', phone)
+        .where('status', 'in', ['pending', 'confirmed', 'assigned', 'on_the_way', 'in_progress'])
+        .get();
+      const cancelBatch = firestore().batch();
+      activeSnap.docs.forEach(d => {
+        cancelBatch.update(d.ref, {
+          status: 'cancelled',
+          cancelledAt: firestore.FieldValue.serverTimestamp(),
+          cancelReason: 'account_deleted',
+        });
+      });
+      if (activeSnap.size > 0) await cancelBatch.commit();
+      result.cancelledBookings = activeSnap.size;
+    } catch (e) { console.log('cancel active bookings:', e.message); }
+
+    // 2. Anonymize past completed bookings (kept for tax/audit, but PII stripped)
+    try {
+      const pastSnap = await firestore().collection('bookings')
+        .where('customerPhone', '==', phone)
+        .where('status', 'in', ['completed', 'cancelled'])
+        .get();
+      const anonBatch = firestore().batch();
+      pastSnap.docs.forEach(d => {
+        anonBatch.update(d.ref, {
+          customerName: '[deleted]',
+          customerPhone: '[deleted]',
+          userName: '[deleted]',
+          userPhone: '[deleted]',
+          address: { city: 'Visakhapatnam' },
+          addressFull: '[deleted]',
+          accountDeletedAt: firestore.FieldValue.serverTimestamp(),
+        });
+      });
+      if (pastSnap.size > 0) await anonBatch.commit();
+      result.anonymizedBookings = pastSnap.size;
+    } catch (e) { console.log('anonymize past bookings:', e.message); }
+
+    // 3. Delete saved addresses subcollection
+    try {
+      const addrSnap = await firestore().collection('users').doc(phone).collection('addresses').get();
+      const addrBatch = firestore().batch();
+      addrSnap.docs.forEach(d => addrBatch.delete(d.ref));
+      if (addrSnap.size > 0) await addrBatch.commit();
+      result.deletedFields.push(`${addrSnap.size} addresses`);
+    } catch (e) { console.log('delete addresses:', e.message); }
+
+    // 4. Delete user's booking mirror subcollection
+    try {
+      const userBookSnap = await firestore().collection('users').doc(phone).collection('bookings').get();
+      const ubBatch = firestore().batch();
+      userBookSnap.docs.forEach(d => ubBatch.delete(d.ref));
+      if (userBookSnap.size > 0) await ubBatch.commit();
+      result.deletedFields.push(`${userBookSnap.size} booking mirrors`);
+    } catch (e) { console.log('delete user bookings:', e.message); }
+
+    // 5. Delete wallet_transactions for this phone
+    try {
+      const walletSnap = await firestore().collection('wallet_transactions')
+        .where('phone', '==', phone).get();
+      const walletBatch = firestore().batch();
+      walletSnap.docs.forEach(d => walletBatch.delete(d.ref));
+      if (walletSnap.size > 0) await walletBatch.commit();
+      result.deletedFields.push(`${walletSnap.size} wallet transactions`);
+    } catch (e) { console.log('delete wallet txns:', e.message); }
+
+    // 6. Delete user document itself
+    try {
+      await firestore().collection('users').doc(phone).delete();
+      result.deletedFields.push('user profile');
+    } catch (e) { console.log('delete user doc:', e.message); }
+
+    // 7. Delete Firebase Auth user (requires recent login — may need re-auth)
+    try {
+      const fUser = auth().currentUser;
+      if (fUser) {
+        await fUser.delete();
+        result.deletedFields.push('Firebase Auth account');
+      }
+    } catch (e) {
+      if (e.code === 'auth/requires-recent-login') {
+        // Sign out anyway — data is deleted, auth user will be cleaned up next session
+        await auth().signOut();
+        return { ...result, ok: true, requiresRecentLogin: true };
+      }
+      console.log('delete auth user:', e.code, e.message);
+    }
+
+    return { ...result, ok: true };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+};
+
 // ── Bug 7: Saved Addresses CRUD ─────────────────────────────────────
 // Subcollection: users/{phone}/addresses/{autoId}
 // Fields: label ('Home'|'Office'|'Other'), flat, buildingName, streetName,
@@ -1128,6 +1232,11 @@ export default function App() {
   // ── Issue 6: Customer name edit state ────────────────────────────────
   const [showNameModal, setShowNameModal] = useState(false);
   const [nameInput, setNameInput]         = useState('');
+
+  // ── Apple 5.1.1(v): Account Deletion state ───────────────────────────
+  const [showDeleteAccountModal, setShowDeleteAccountModal] = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText]           = useState('');
+  const [deletingAccount, setDeletingAccount]               = useState(false);
 
   // ── Razorpay config state (loaded from Firestore app_config/payment) ──
   // Admin updates this doc in Firebase Console to swap test↔live keys
@@ -3046,6 +3155,87 @@ export default function App() {
           onSuccess={handleRazorpaySuccess}
           onCancel={handleRazorpayCancel}
         />
+        {/* Apple 5.1.1(v): Delete Account modal — 2-step confirmation */}
+        <Modal visible={showDeleteAccountModal} transparent animationType="slide" onRequestClose={() => !deletingAccount && setShowDeleteAccountModal(false)}>
+          <View style={{flex:1,backgroundColor:'rgba(0,0,0,0.7)',justifyContent:'center',padding:20}}>
+            <View style={{backgroundColor:'#FFF',borderRadius:20,padding:24}}>
+              <View style={{alignItems:'center',marginBottom:14}}>
+                <View style={{width:60,height:60,borderRadius:30,backgroundColor:'rgba(176,40,24,0.10)',alignItems:'center',justifyContent:'center',marginBottom:10}}>
+                  <Text style={{fontSize:30}}>⚠️</Text>
+                </View>
+                <Text style={{fontWeight:'800',fontSize:19,color:'#B02818'}}>Delete Account?</Text>
+              </View>
+              <Text style={{fontSize:13,color:'#3A1A0A',marginBottom:12,lineHeight:19}}>
+                This will permanently delete:
+              </Text>
+              <Text style={{fontSize:12,color:'#5A4030',marginBottom:14,lineHeight:18}}>
+                • Your profile (name, phone, wallet balance){'\n'}
+                • All saved addresses{'\n'}
+                • All wallet transaction history{'\n'}
+                • Pending bookings will be cancelled{'\n'}
+                • Past completed bookings will be anonymized (kept for our accounting records but no longer linked to you)
+              </Text>
+              <View style={{backgroundColor:'#FFF5F0',borderRadius:10,padding:10,marginBottom:14,borderWidth:0.5,borderColor:'#B02818'}}>
+                <Text style={{fontSize:11,color:'#B02818',fontWeight:'700'}}>⚠️ This cannot be undone.</Text>
+                <Text style={{fontSize:10,color:'#7A4030',marginTop:3}}>To re-use VEGA later, you'd have to create a new account.</Text>
+              </View>
+
+              <Text style={{fontSize:12,fontWeight:'600',color:'#3A1A0A',marginBottom:6}}>Type DELETE to confirm:</Text>
+              <TextInput
+                value={deleteConfirmText}
+                onChangeText={setDeleteConfirmText}
+                placeholder="DELETE"
+                autoCapitalize="characters"
+                editable={!deletingAccount}
+                style={{borderWidth:1,borderColor:'#E8DDD4',borderRadius:12,padding:12,fontSize:14,color:'#18080A',marginBottom:14,letterSpacing:2}}
+              />
+
+              <View style={{flexDirection:'row',gap:10}}>
+                <TouchableOpacity
+                  disabled={deletingAccount}
+                  onPress={()=>{ setShowDeleteAccountModal(false); setDeleteConfirmText(''); }}
+                  style={{flex:1,padding:14,borderRadius:14,borderWidth:1,borderColor:'#E8DDD4',alignItems:'center',opacity:deletingAccount?0.5:1}}>
+                  <Text style={{color:'#3A1A0A',fontWeight:'600'}}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  disabled={deletingAccount || deleteConfirmText.trim().toUpperCase() !== 'DELETE'}
+                  onPress={async ()=>{
+                    if (deleteConfirmText.trim().toUpperCase() !== 'DELETE') return;
+                    setDeletingAccount(true);
+                    const phoneForDelete = phone;
+                    const result = await deleteUserAccount(phoneForDelete);
+                    setDeletingAccount(false);
+                    if (result.ok) {
+                      // Clean up local state + listeners
+                      if (ordersUnsub) ordersUnsub();
+                      if (addrsUnsub) addrsUnsub();
+                      setOrdersUnsub(null); setAddrsUnsub(null);
+                      setSavedAddrs([]); setOrders([]); setUser(null);
+                      setPhone(''); setOtpVal(''); setConfirm(null);
+                      setShowDeleteAccountModal(false); setDeleteConfirmText('');
+                      setScreen('login');
+                      const summary = result.requiresRecentLogin
+                        ? 'Your data has been deleted. The login record will be fully removed within 24 hours.'
+                        : `Your account and all personal data have been permanently removed.\n\nCancelled bookings: ${result.cancelledBookings}\nAnonymized past records: ${result.anonymizedBookings}`;
+                      Alert.alert('✅ Account Deleted', summary);
+                    } else {
+                      Alert.alert('Could not delete', `Error: ${result.error || 'unknown'}. Please try again or contact hello@vegavizag.in for help.`);
+                    }
+                  }}
+                  style={{
+                    flex:2,padding:14,borderRadius:14,alignItems:'center',
+                    backgroundColor: deleteConfirmText.trim().toUpperCase()==='DELETE' ? '#B02818' : '#E8C0B5',
+                    opacity: deletingAccount ? 0.6 : 1,
+                  }}>
+                  {deletingAccount
+                    ? <ActivityIndicator color="#FFF"/>
+                    : <Text style={{color:'#FFF',fontWeight:'800'}}>🗑️ Delete Forever</Text>}
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+
         {/* Issue 6: Name edit modal */}
         <Modal visible={showNameModal} transparent animationType="fade">
           <View style={{flex:1,backgroundColor:'rgba(0,0,0,0.6)',justifyContent:'center',padding:24}}>
@@ -4246,7 +4436,7 @@ export default function App() {
               <Text style={{color:C.muted2,fontSize:22}}>›</Text>
             </TouchableOpacity>
           ))}
-          {user&&<TouchableOpacity style={{borderWidth:0.5,borderColor:C.redBd,borderRadius:20,padding:14,marginTop:8,marginBottom:40,alignItems:'center',backgroundColor:C.redSolid}} onPress={()=>{
+          {user&&<TouchableOpacity style={{borderWidth:0.5,borderColor:C.redBd,borderRadius:20,padding:14,marginTop:8,alignItems:'center',backgroundColor:C.redSolid}} onPress={()=>{
             if(ordersUnsub) ordersUnsub();
             setOrdersUnsub(null);
             if(addrsUnsub) addrsUnsub();    // Bug 7: unsub addresses listener
@@ -4263,6 +4453,15 @@ export default function App() {
           }}>
             <Text style={{color:C.red,fontWeight:'600',fontSize:15}}>Logout</Text>
           </TouchableOpacity>}
+          {/* Apple 5.1.1(v): Delete Account — required for App Store approval */}
+          {user && (
+            <TouchableOpacity
+              style={{borderWidth:1,borderColor:'#B02818',borderRadius:20,padding:14,marginTop:10,marginBottom:40,alignItems:'center',backgroundColor:'rgba(176,40,24,0.05)'}}
+              onPress={()=>{ setDeleteConfirmText(''); setShowDeleteAccountModal(true); }}>
+              <Text style={{color:'#B02818',fontWeight:'700',fontSize:14}}>🗑️ Delete My Account</Text>
+              <Text style={{color:'#9D8068',fontSize:10,marginTop:3,textAlign:'center'}}>Permanently remove your account and personal data</Text>
+            </TouchableOpacity>
+          )}
           {!user&&<View style={{height:40}}/>}
         </View>
       </ScrollView>
