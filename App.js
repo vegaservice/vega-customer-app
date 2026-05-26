@@ -2031,7 +2031,10 @@ export default function App() {
       };
 
       resetForm();
-      Alert.alert('🎉 Booking Confirmed!',`Order #${result.orderId}\n📅 ${slot}\n👩 ${pro.name}\n🔐 OTP: ${result.otp}`,[
+      // FIX (pre-launch audit): pro.name is null at this point (worker assigned
+      // later via Hub Manager / self-accept). Don't show "null" to user.
+      const proLine = pro.name ? `\n👩 ${pro.name}` : '\n👩 Finding a professional…';
+      Alert.alert('🎉 Booking Confirmed!',`Order #${result.orderId}\n📅 ${slot}${proLine}\n🔐 OTP: ${result.otp}`,[
         {text:'Track Order',onPress:()=>{
           setTrackOrd(o);
           setScreen('track');
