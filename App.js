@@ -924,9 +924,146 @@ try {
   );
 };
 
+// ════════════════════════════════════════════════════════════════
+// 🐛 BUG REPORT — floating button + modal, OTA-deployable
+// Captures: app, screen, user, booking, device, description
+// Sends to: Firestore `bug_reports` collection
+// View at: Firebase Console → Firestore → bug_reports
+// ════════════════════════════════════════════════════════════════
+const submitBugReport = async (context, description, severity) => {
+  try {
+    await firestore().collection('bug_reports').add({
+      app: 'customer',
+      description: (description || '').trim(),
+      severity: severity || 'normal',
+      reportedAt: firestore.FieldValue.serverTimestamp(),
+      ...context,
+      status: 'open',
+      device: {
+        os: Platform.OS,
+        version: Platform.Version,
+      },
+    });
+    return true;
+  } catch (e) {
+    console.log('submitBugReport error:', e.message);
+    return false;
+  }
+};
+
+const BugReportButton = ({ onPress }) => (
+  <TouchableOpacity
+    onPress={onPress}
+    style={{
+      position: 'absolute',
+      bottom: 96,           // above bottom nav
+      right: 14,
+      width: 44, height: 44, borderRadius: 22,
+      backgroundColor: 'rgba(200,84,26,0.9)',
+      alignItems: 'center', justifyContent: 'center',
+      shadowColor: '#C8541A', shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.4, shadowRadius: 8, elevation: 8,
+      zIndex: 999,
+    }}>
+    <Text style={{ fontSize: 20 }}>🐛</Text>
+  </TouchableOpacity>
+);
+
+const BugReportModal = ({ visible, onClose, onSubmit, context }) => {
+  const [desc, setDesc] = React.useState('');
+  const [severity, setSeverity] = React.useState('normal');
+  const [submitting, setSubmitting] = React.useState(false);
+
+  React.useEffect(() => {
+    if (!visible) { setDesc(''); setSeverity('normal'); setSubmitting(false); }
+  }, [visible]);
+
+  const send = async () => {
+    if (desc.trim().length < 5) {
+      Alert.alert('Need a description', 'Please describe the issue in at least 5 characters');
+      return;
+    }
+    setSubmitting(true);
+    const ok = await onSubmit(context, desc, severity);
+    setSubmitting(false);
+    if (ok) {
+      Alert.alert('🐛 Bug Report Sent', 'Thank you! Our team will look into it. (Report saved to Firestore bug_reports)');
+      onClose();
+    } else {
+      Alert.alert('Failed to send', 'Could not save the report. Check your internet and try again.');
+    }
+  };
+
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' }}>
+        <View style={{ backgroundColor: '#FEFCF8', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 20, paddingBottom: 32 }}>
+          <View style={{ width: 40, height: 4, backgroundColor: '#E8DDD4', borderRadius: 2, alignSelf: 'center', marginBottom: 14 }} />
+          <Text style={{ fontSize: 18, fontWeight: '700', color: '#18080A', marginBottom: 4 }}>🐛 Report a Bug</Text>
+          <Text style={{ fontSize: 12, color: '#7A6048', marginBottom: 14 }}>
+            We auto-capture screen, user, booking, and device info — just describe what went wrong.
+          </Text>
+
+          <Text style={{ fontSize: 12, fontWeight: '600', color: '#18080A', marginBottom: 6 }}>Severity</Text>
+          <View style={{ flexDirection: 'row', gap: 8, marginBottom: 14 }}>
+            {[
+              { id: 'low',     label: '🟢 Minor',    color: '#1E6B3A' },
+              { id: 'normal',  label: '🟠 Normal',   color: '#C8541A' },
+              { id: 'high',    label: '🔴 Critical', color: '#B02818' },
+            ].map(s => (
+              <TouchableOpacity key={s.id}
+                onPress={() => setSeverity(s.id)}
+                style={{
+                  flex: 1, paddingVertical: 10, borderRadius: 12,
+                  backgroundColor: severity === s.id ? s.color : '#FFF',
+                  borderWidth: 1, borderColor: severity === s.id ? s.color : '#E8DDD4',
+                  alignItems: 'center',
+                }}>
+                <Text style={{ fontSize: 11, fontWeight: '700', color: severity === s.id ? '#FFF' : '#18080A' }}>{s.label}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          <Text style={{ fontSize: 12, fontWeight: '600', color: '#18080A', marginBottom: 6 }}>What went wrong?</Text>
+          <TextInput
+            multiline
+            placeholder="Example: 'Tapped Confirm Booking but nothing happened' OR 'Payment screen shows wrong amount ₹178 instead of ₹149'"
+            value={desc}
+            onChangeText={setDesc}
+            style={{
+              borderWidth: 1, borderColor: '#E8DDD4', borderRadius: 14,
+              padding: 14, fontSize: 14, color: '#18080A',
+              minHeight: 100, textAlignVertical: 'top', marginBottom: 14,
+            }}
+          />
+
+          <View style={{ backgroundColor: '#FAF5EE', borderRadius: 10, padding: 10, marginBottom: 14 }}>
+            <Text style={{ fontSize: 10, color: '#7A6048' }}>📎 Auto-attached: screen={context.currentScreen || 'unknown'}, tab={context.currentTab || '-'}, user={context.userPhone || 'guest'}, booking={context.currentBookingId || 'none'}</Text>
+          </View>
+
+          <View style={{ flexDirection: 'row', gap: 10 }}>
+            <TouchableOpacity onPress={onClose} style={{ flex: 1, padding: 14, borderRadius: 14, borderWidth: 1, borderColor: '#E8DDD4', alignItems: 'center' }}>
+              <Text style={{ color: '#7A6048', fontWeight: '600' }}>Cancel</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={send} disabled={submitting} style={{ flex: 2, padding: 14, borderRadius: 14, backgroundColor: '#C8541A', alignItems: 'center', opacity: submitting ? 0.5 : 1 }}>
+              {submitting
+                ? <ActivityIndicator color="#FFF" />
+                : <Text style={{ color: '#FFF', fontWeight: '700' }}>Send Report</Text>}
+            </TouchableOpacity>
+          </View>
+          <Text style={{ fontSize: 9, color: '#9D8068', textAlign: 'center', marginTop: 8 }}>
+            Tip: After tapping Send, take a phone screenshot and share it with us via WhatsApp/email for visual context.
+          </Text>
+        </View>
+      </View>
+    </Modal>
+  );
+};
+
 export default function App() {
   const [screen,        setScreen]        = useState('splash');
   const [tab,           setTab]           = useState('home');
+  const [showBugModal,  setShowBugModal]  = useState(false);
   const [phone,         setPhone]         = useState('');
   const [otpVal,        setOtpVal]        = useState('');
   const [uname,         setUname]         = useState('');
@@ -4313,6 +4450,23 @@ export default function App() {
           </TouchableOpacity>
         </View>
       </View>
+      {/* 🐛 Floating Bug Report — visible across all main tabs */}
+      <BugReportButton onPress={() => setShowBugModal(true)} />
+      <BugReportModal
+        visible={showBugModal}
+        onClose={() => setShowBugModal(false)}
+        onSubmit={submitBugReport}
+        context={{
+          currentScreen: screen,
+          currentTab: tab,
+          userPhone: phone || null,
+          userName: user?.name || null,
+          currentBookingId: trackOrd?.orderId || null,
+          cartCount: cart?.length || 0,
+          cartTotal: cartTotal || 0,
+          bookMode: bookMode || null,
+        }}
+      />
     </View>
   );
 }

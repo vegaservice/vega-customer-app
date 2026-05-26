@@ -120,6 +120,14 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // ── BUG REPORTS (in-app bug button writes here) ────────
+    match /bug_reports/{reportId} {
+      allow create: if true;                 // any user (logged-in or guest)
+      allow read:   if request.auth != null; // admin/dev reads via Console
+      allow update: if request.auth != null; // status updates (resolved etc.)
+      allow delete: if false;
+    }
+
     // ── DEFAULT: deny everything else ──────────────────────
     match /{document=**} {
       allow read, write: if false;
