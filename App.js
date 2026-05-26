@@ -319,13 +319,11 @@ const PROMOS = {
   'VEGA2025':{type:'pct',  val:20,  label:'20% off — Welcome offer'},
 };
 
-const PROFESSIONALS = [
-  {id:'p1',name:'Lakshmi Devi',  rating:4.9,jobs:312,exp:'3 yrs',badge:'Top Rated',initial:'L',color:'#C8541A'},
-  {id:'p2',name:'Priya Sharma',  rating:4.8,jobs:247,exp:'2 yrs',badge:'Verified',  initial:'P',color:'#0E5848'},
-  {id:'p3',name:'Anitha Rao',    rating:4.9,jobs:189,exp:'2 yrs',badge:'Top Rated',initial:'A',color:'#4E2480'},
-  {id:'p4',name:'Sunitha Naidu', rating:4.7,jobs:156,exp:'1 yr', badge:'Verified',  initial:'S',color:'#183880'},
-  {id:'p5',name:'Meena Kumari',  rating:5.0,jobs:98, exp:'4 yrs',badge:'Elite Pro', initial:'M',color:'#B02818'},
-];
+// PROFESSIONALS array (Lakshmi Devi, Priya Sharma, etc.) REMOVED — was used
+// to write fake random worker names to bookings at creation. Replaced by
+// real worker assignment via Hub Manager or worker self-accept. The booking
+// `professional` field now starts null and is populated with the REAL
+// assigned worker's data when assignment happens.
 
 const SERVICES = [
   { id:'home',    name:'Home\nCleaning',  shortName:'Home Cleaning',   icon:'🏠', gradient:['#FF6B35','#C8541A'], shadow:'rgba(200,84,26,0.4)',  iconBg:'#FF8B55', tagline:'Sweeping, mopping & full home clean',       workerLabel:'Cleaners',    badge:'Most Booked',
