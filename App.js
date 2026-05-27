@@ -43,7 +43,7 @@ import * as Updates from 'expo-updates';
 
 // OTA build label — bump this every release so user can verify which build is loaded.
 // Increment the number whenever you ship a new OTA so the user knows it landed.
-const OTA_BUILD_LABEL = 'v10 · 27-May · Delete-Cloud-Fn';
+const OTA_BUILD_LABEL = 'v11 · 27-May · Screenshot-Attach';
 
 // ── Firestore Service Functions (inline — no separate file needed) ──
 const createOrUpdateUser = async (phone, data) => {
@@ -1033,9 +1033,9 @@ try {
 // Sends to: Firestore `bug_reports` collection
 // View at: Firebase Console → Firestore → bug_reports
 // ════════════════════════════════════════════════════════════════
-const submitBugReport = async (context, description, severity) => {
+const submitBugReport = async (context, description, severity, screenshotDataUrl = null) => {
   try {
-    const ref = await firestore().collection('bug_reports').add({
+    const doc = {
       app: 'customer',
       description: (description || '').trim(),
       severity: severity || 'normal',
@@ -1046,8 +1046,15 @@ const submitBugReport = async (context, description, severity) => {
         os: Platform.OS,
         version: Platform.Version,
       },
-    });
-    // Short, human-readable bug ID (last 6 chars of Firestore doc ID) for WhatsApp matching
+    };
+    // Attach screenshot inline (base64) if provided. Firestore doc limit is
+    // ~1 MB; the WebView picker compresses to ~250 KB so we have headroom.
+    if (screenshotDataUrl && typeof screenshotDataUrl === 'string') {
+      doc.screenshot = screenshotDataUrl;
+      doc.hasScreenshot = true;
+      doc.screenshotSizeBytes = Math.round(screenshotDataUrl.length * 0.75);
+    }
+    const ref = await firestore().collection('bug_reports').add(doc);
     const bugId = 'BUG-' + ref.id.slice(-6).toUpperCase();
     return { ok: true, bugId };
   } catch (e) {
@@ -1074,25 +1081,88 @@ const BugReportButton = ({ onPress }) => (
   </TouchableOpacity>
 );
 
+// HTML for in-WebView image picker — opens native gallery/camera, compresses
+// to max 1200px + 70% JPEG quality (typically <250 KB), returns as base64
+// data URL to the parent via postMessage. Fits well under Firestore's 1 MB
+// document limit, so we store the screenshot inline on the bug_report doc.
+const IMAGE_PICKER_HTML = `
+<!DOCTYPE html><html><head>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+<style>
+  body { margin:0; padding:24px; font-family:-apple-system,system-ui,sans-serif; background:#F8F3EE; color:#18080A; }
+  h2 { font-size:18px; margin:0 0 8px; }
+  p  { font-size:13px; color:#7A6048; margin:0 0 18px; }
+  .btn { display:block; width:100%; padding:16px; border:none; border-radius:14px; background:#C8541A; color:#FFF; font-size:15px; font-weight:700; margin-bottom:10px; }
+  .alt { background:#FFF; color:#C8541A; border:1.5px solid #C8541A; }
+  .status { font-size:12px; color:#1E6B3A; margin-top:14px; min-height:20px; }
+  input { display:none; }
+  img.preview { max-width:100%; max-height:260px; border-radius:12px; margin-top:14px; border:1px solid #E8DDD4; }
+</style></head><body>
+<h2>📸 Attach Screenshot</h2>
+<p>Pick the screenshot you took on your phone. We'll compress + attach it to your bug report.</p>
+<button class="btn" onclick="document.getElementById('p').click()">📷 Pick from Gallery</button>
+<input id="p" type="file" accept="image/*" />
+<div class="status" id="s"></div>
+<img id="pv" class="preview" style="display:none" />
+<script>
+  const s = document.getElementById('s');
+  const pv = document.getElementById('pv');
+  function post(type, data) {
+    try { window.ReactNativeWebView.postMessage(JSON.stringify({ type, data })); } catch (e) {}
+  }
+  document.getElementById('p').onchange = (e) => {
+    const f = e.target.files[0];
+    if (!f) return;
+    s.textContent = 'Compressing...';
+    const r = new FileReader();
+    r.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        const MAX = 1200;
+        let w = img.width, h = img.height;
+        if (w > MAX || h > MAX) {
+          const ratio = w > h ? MAX/w : MAX/h;
+          w = Math.round(w*ratio); h = Math.round(h*ratio);
+        }
+        const c = document.createElement('canvas');
+        c.width = w; c.height = h;
+        c.getContext('2d').drawImage(img, 0, 0, w, h);
+        const dataUrl = c.toDataURL('image/jpeg', 0.7);
+        const kb = Math.round((dataUrl.length * 0.75) / 1024);
+        pv.src = dataUrl; pv.style.display = 'block';
+        s.textContent = 'Ready (' + kb + ' KB) · tap "Use This"';
+        post('ready', { dataUrl, sizeKB: kb });
+      };
+      img.src = r.result;
+    };
+    r.readAsDataURL(f);
+  };
+  post('loaded');
+</script>
+</body></html>`;
+
 const BugReportModal = ({ visible, onClose, onSubmit, context }) => {
-  const [desc, setDesc] = React.useState('');
-  const [severity, setSeverity] = React.useState('normal');
+  const [desc, setDesc]             = React.useState('');
+  const [severity, setSeverity]     = React.useState('normal');
   const [submitting, setSubmitting] = React.useState(false);
+  const [showPicker, setShowPicker] = React.useState(false);
+  const [screenshot, setScreenshot] = React.useState(null);   // { dataUrl, sizeKB }
 
   React.useEffect(() => {
-    if (!visible) { setDesc(''); setSeverity('normal'); setSubmitting(false); }
+    if (!visible) {
+      setDesc(''); setSeverity('normal'); setSubmitting(false);
+      setShowPicker(false); setScreenshot(null);
+    }
   }, [visible]);
 
-  // Open WhatsApp to send screenshot to support — bug ID prefilled in message
-  const shareToWhatsApp = (bugId) => {
-    const msg = encodeURIComponent(
-      `Hi VEGA support,\n\nBug Report ID: ${bugId || 'unknown'}\nScreen: ${context.currentScreen || 'unknown'}\n\n📸 Screenshot attached above.\n\n(Sent from VEGA app)`
-    );
-    // wa.me works on both iOS and Android, opens WhatsApp if installed
-    const url = `https://wa.me/919441270570?text=${msg}`;
-    Linking.openURL(url).catch(() => {
-      Alert.alert('WhatsApp not installed', `Please send your screenshot to +91 9441270570 mentioning Bug ID: ${bugId}`);
-    });
+  const handlePickerMessage = (event) => {
+    try {
+      const msg = JSON.parse(event.nativeEvent.data || '{}');
+      if (msg.type === 'ready' && msg.data?.dataUrl) {
+        // Show immediately — user still has to tap "Use This" below
+        setScreenshot(msg.data);
+      }
+    } catch (e) { /* ignore */ }
   };
 
   const send = async () => {
@@ -1102,24 +1172,19 @@ const BugReportModal = ({ visible, onClose, onSubmit, context }) => {
     }
     Keyboard.dismiss();
     setSubmitting(true);
-    const result = await onSubmit(context, desc, severity);
+    // Pass screenshot (if any) to onSubmit — caller decides what to do with it
+    const result = await onSubmit(context, desc, severity, screenshot?.dataUrl || null);
     setSubmitting(false);
-    // onSubmit may return either { ok, bugId } or a boolean — handle both
     const ok    = typeof result === 'object' ? result?.ok    : result;
     const bugId = typeof result === 'object' ? result?.bugId : null;
     if (ok) {
       onClose();
-      // Give the modal a moment to close before showing the success prompt
       setTimeout(() => {
         Alert.alert(
-          '🐛 Bug Sent — Want to attach a screenshot?',
-          `Bug ID: ${bugId || 'saved'}\n\n📸 To attach a screenshot:\n1. Take a phone screenshot now (Power + Volume Up)\n2. Tap "Send via WhatsApp" below\n3. Pick that screenshot in WhatsApp\n\nWe'll match it to your bug ID and look into it.`,
-          [
-            { text: 'Skip', style: 'cancel' },
-            { text: '💬 Send via WhatsApp', onPress: () => shareToWhatsApp(bugId) },
-          ]
+          '✅ Bug Report Sent',
+          `Bug ID: ${bugId || 'saved'}${screenshot ? '\n📸 Screenshot attached (' + screenshot.sizeKB + ' KB).' : ''}\n\nOur team will look into it. Thanks!`
         );
-      }, 350);
+      }, 250);
     } else {
       Alert.alert('Failed to send', 'Could not save the report. Check your internet and try again.');
     }
@@ -1181,10 +1246,31 @@ const BugReportModal = ({ visible, onClose, onSubmit, context }) => {
                   }}
                 />
 
-                <View style={{ backgroundColor: '#FAF5EE', borderRadius: 10, padding: 10, marginBottom: 14 }}>
+                <View style={{ backgroundColor: '#FAF5EE', borderRadius: 10, padding: 10, marginBottom: 12 }}>
                   <Text style={{ fontSize: 10, color: '#7A6048' }}>📎 Auto-attached: screen={context.currentScreen || 'unknown'}, tab={context.currentTab || '-'}, user={context.userPhone || 'guest'}, booking={context.currentBookingId || 'none'}</Text>
-                  <Text style={{ fontSize: 10, color: '#1E6B3A', marginTop: 6, fontWeight: '600' }}>📸 After sending, you'll get an option to share a screenshot via WhatsApp.</Text>
                 </View>
+
+                {/* 📸 Screenshot attachment — opens WebView image picker */}
+                {!screenshot ? (
+                  <TouchableOpacity
+                    onPress={() => setShowPicker(true)}
+                    style={{ borderWidth: 1.5, borderColor: '#C8541A', borderStyle: 'dashed', borderRadius: 12, padding: 14, marginBottom: 14, alignItems: 'center', backgroundColor: 'rgba(200,84,26,0.05)' }}>
+                    <Text style={{ fontSize: 20, marginBottom: 4 }}>📸</Text>
+                    <Text style={{ color: '#C8541A', fontWeight: '700', fontSize: 13 }}>Attach a Screenshot</Text>
+                    <Text style={{ color: '#7A6048', fontSize: 10, marginTop: 3, textAlign: 'center' }}>Pick from gallery — we'll compress it automatically</Text>
+                  </TouchableOpacity>
+                ) : (
+                  <View style={{ flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#1E6B3A', borderRadius: 12, padding: 10, marginBottom: 14, backgroundColor: 'rgba(30,107,58,0.05)' }}>
+                    <Image source={{ uri: screenshot.dataUrl }} style={{ width: 56, height: 56, borderRadius: 8, marginRight: 12 }} />
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ color: '#1E6B3A', fontWeight: '700', fontSize: 13 }}>📸 Screenshot ready</Text>
+                      <Text style={{ color: '#7A6048', fontSize: 11, marginTop: 2 }}>{screenshot.sizeKB} KB — will be attached</Text>
+                    </View>
+                    <TouchableOpacity onPress={() => setScreenshot(null)} style={{ paddingHorizontal: 10, paddingVertical: 6 }}>
+                      <Text style={{ color: '#B02818', fontSize: 18 }}>×</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
 
                 <View style={{ flexDirection: 'row', gap: 10 }}>
                   <TouchableOpacity onPress={() => { Keyboard.dismiss(); onClose(); }} style={{ flex: 1, padding: 14, borderRadius: 14, borderWidth: 1, borderColor: '#E8DDD4', alignItems: 'center' }}>
@@ -1201,6 +1287,31 @@ const BugReportModal = ({ visible, onClose, onSubmit, context }) => {
           </View>
         </TouchableWithoutFeedback>
       </KeyboardAvoidingView>
+
+      {/* Image picker modal (WebView, opens native gallery via <input type=file>) */}
+      <Modal visible={showPicker} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setShowPicker(false)}>
+        <SafeAreaView style={{ flex: 1, backgroundColor: '#F8F3EE' }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 14, borderBottomWidth: 0.5, borderBottomColor: '#E8DDD4' }}>
+            <TouchableOpacity onPress={() => setShowPicker(false)}>
+              <Text style={{ color: '#C8541A', fontSize: 15, fontWeight: '600' }}>← Back</Text>
+            </TouchableOpacity>
+            <Text style={{ fontSize: 15, fontWeight: '700', color: '#18080A' }}>Attach Screenshot</Text>
+            <TouchableOpacity
+              disabled={!screenshot}
+              onPress={() => setShowPicker(false)}
+              style={{ opacity: screenshot ? 1 : 0.3 }}>
+              <Text style={{ color: '#1E6B3A', fontSize: 15, fontWeight: '700' }}>Use This ✓</Text>
+            </TouchableOpacity>
+          </View>
+          <WebView
+            originWhitelist={['*']}
+            source={{ html: IMAGE_PICKER_HTML }}
+            onMessage={handlePickerMessage}
+            javaScriptEnabled
+            style={{ flex: 1, backgroundColor: '#F8F3EE' }}
+          />
+        </SafeAreaView>
+      </Modal>
     </Modal>
   );
 };
