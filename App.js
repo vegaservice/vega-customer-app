@@ -1268,6 +1268,30 @@ export default function App() {
   const [showNameModal, setShowNameModal] = useState(false);
   const [nameInput, setNameInput]         = useState('');
 
+  // ── 🐛 Bug FAB component (renders button + modal; can be placed in any screen)
+  // Defined inside App() so it closes over showBugModal state and context fields.
+  // Use <BugFAB/> at the end of any screen's root container.
+  const BugFAB = () => (
+    <React.Fragment>
+      <BugReportButton onPress={() => setShowBugModal(true)} />
+      <BugReportModal
+        visible={showBugModal}
+        onClose={() => setShowBugModal(false)}
+        onSubmit={submitBugReport}
+        context={{
+          currentScreen: screen,
+          currentTab: tab,
+          userPhone: phone || null,
+          userName: user?.name || null,
+          currentBookingId: trackOrd?.orderId || null,
+          cartCount: cart?.length || 0,
+          cartTotal: cartTotal || 0,
+          bookMode: bookMode || null,
+        }}
+      />
+    </React.Fragment>
+  );
+
   // ── Apple 5.1.1(v): Account Deletion / Deactivation state ────────────
   const [showAccountManageModal, setShowAccountManageModal] = useState(false);
   const [showDeleteAccountModal, setShowDeleteAccountModal] = useState(false);
@@ -2262,6 +2286,7 @@ export default function App() {
           <Text style={{color:C.orange,fontSize:12,fontWeight:'500',lineHeight:18}}>🔒 By continuing you agree to VEGA's Terms of Service. Your number is used only for booking verification.</Text>
         </View>
       </ScrollView>
+      <BugFAB/>
     </SafeAreaView>
   );
 
@@ -2315,6 +2340,7 @@ export default function App() {
           </TouchableOpacity>
         )}
       </ScrollView>
+      <BugFAB/>
     </SafeAreaView>
   );
 
@@ -2615,6 +2641,7 @@ export default function App() {
             </View>
           </View>
         )}
+        <BugFAB/>
       </SafeAreaView>
     );
   }
@@ -2674,6 +2701,7 @@ export default function App() {
             </TouchableOpacity>
           </View>
         </View>
+        <BugFAB/>
       </SafeAreaView>
     );
   }
@@ -2844,6 +2872,7 @@ export default function App() {
             </TouchableOpacity>
           </View>
         </View>
+        <BugFAB/>
       </SafeAreaView>
     );
   }
@@ -3493,6 +3522,7 @@ export default function App() {
             </View>
           </View>
         </Modal>
+        <BugFAB/>
       </SafeAreaView>
     );
   }
@@ -3589,6 +3619,7 @@ export default function App() {
             </>
           )}
         </View>
+        <BugFAB/>
       </SafeAreaView>
     );
   }
@@ -3748,6 +3779,7 @@ export default function App() {
           ))}
           <View style={{height:30}}/>
         </ScrollView>
+        <BugFAB/>
       </SafeAreaView>
     );
   }
@@ -3929,6 +3961,7 @@ export default function App() {
           )}
           <View style={{height:32}}/>
         </ScrollView>
+        <BugFAB/>
       </SafeAreaView>
     );
   }
@@ -3979,6 +4012,7 @@ export default function App() {
           </View>
           <View style={{height:40}}/>
         </ScrollView>
+        <BugFAB/>
       </SafeAreaView>
     );
   }
@@ -4874,22 +4908,7 @@ export default function App() {
         </View>
       </View>
       {/* 🐛 Floating Bug Report — visible across all main tabs */}
-      <BugReportButton onPress={() => setShowBugModal(true)} />
-      <BugReportModal
-        visible={showBugModal}
-        onClose={() => setShowBugModal(false)}
-        onSubmit={submitBugReport}
-        context={{
-          currentScreen: screen,
-          currentTab: tab,
-          userPhone: phone || null,
-          userName: user?.name || null,
-          currentBookingId: trackOrd?.orderId || null,
-          cartCount: cart?.length || 0,
-          cartTotal: cartTotal || 0,
-          bookMode: bookMode || null,
-        }}
-      />
+      <BugFAB/>
     </View>
   );
 }
