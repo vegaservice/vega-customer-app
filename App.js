@@ -43,7 +43,7 @@ import * as Updates from 'expo-updates';
 
 // OTA build label — bump this every release so user can verify which build is loaded.
 // Increment the number whenever you ship a new OTA so the user knows it landed.
-const OTA_BUILD_LABEL = 'v13 · 27-May · Unified-Modal-StateMachine';
+const OTA_BUILD_LABEL = 'v14 · 27-May · Post-Delete-Notice';
 
 // ── Firestore Service Functions (inline — no separate file needed) ──
 const createOrUpdateUser = async (phone, data) => {
@@ -1504,26 +1504,61 @@ export default function App() {
             setPhone(ph);
             let existingUser = await getUser(ph);
 
-            // ── HEAL: If Firestore doc missing (e.g. Bug 1 caused write fail
-            //    during signup), create the doc AND credit the signup bonus.
-            //    Reason: Firebase Auth has them, so they completed OTP at
-            //    some point — they earned the ₹200. Without crediting here,
-            //    a user who never re-logs in stays stuck at ₹0 forever.
-            //    The signupBonusGiven flag still guards against double-credit.
+            // ── Apple 5.1.1(v): Check if phone was previously deleted.
+            //    If so, the user is starting fresh — show a clear notice so
+            //    they (and Apple's reviewer) understand the old account is
+            //    permanently gone. We do NOT auto-credit signup bonus to a
+            //    deleted-then-rejoined phone (prevents abuse + makes it
+            //    obvious this is a fresh start, not the old account back).
+            let wasPreviouslyDeleted = false;
+            let priorDeletionAt = null;
+            try {
+              const delSnap = await firestore().collection('deleted_accounts').doc(ph).get();
+              if (delSnap.exists) {
+                wasPreviouslyDeleted = true;
+                const d = delSnap.data();
+                priorDeletionAt = d?.deletedAt?.toDate ? d.deletedAt.toDate() : null;
+              }
+            } catch (e) { console.log('deleted_accounts check:', e.message); }
+
+            // ── HEAL: If Firestore doc missing, create one.
+            //    Skip the signup bonus if this phone was previously deleted
+            //    (don't gift ₹200 to someone who re-joined after deletion).
             if(!existingUser){
               const refCode = 'VG'+Math.random().toString(36).substr(2,5).toUpperCase();
+              const isFreshAfterDeletion = wasPreviouslyDeleted;
               await createOrUpdateUser(ph, {
                 name: 'Customer',
                 phone: ph,
-                walletBalance: 200,            // ← Bug 6 FIX: credit bonus on heal
+                walletBalance: isFreshAfterDeletion ? 0 : 200,
                 referralCode: refCode,
                 totalBookings: 0,
-                signupBonusGiven: true,        // ← Bonus given (flag prevents re-credit)
+                signupBonusGiven: !isFreshAfterDeletion,
                 createdAt: new Date().toISOString(),
-                restoredFromAuth: true,        // ← marker for analytics
+                restoredFromAuth: true,
+                previouslyDeleted: wasPreviouslyDeleted,
               });
-              await logWalletTransaction(ph, 200, 'signup_bonus_heal', 'credit');
+              if (!isFreshAfterDeletion) {
+                await logWalletTransaction(ph, 200, 'signup_bonus_heal', 'credit');
+              }
               existingUser = await getUser(ph);
+            }
+
+            // ── Show the post-deletion notice ONCE per session.
+            //    Confirms to the user that deletion was real + this is a new account.
+            if (wasPreviouslyDeleted && !existingUser?.deletionNoticeShown) {
+              const dateStr = priorDeletionAt
+                ? priorDeletionAt.toLocaleDateString('en-IN', { day:'numeric', month:'short', year:'numeric' })
+                : 'earlier';
+              setTimeout(() => {
+                Alert.alert(
+                  '👋 Welcome — Fresh Account',
+                  `Your previous VEGA account on this number was permanently deleted on ${dateStr}.\n\nThe old data (bookings, addresses, wallet) cannot be recovered.\n\nThis is a brand new account.`,
+                  [{ text: 'Got it', onPress: async () => {
+                    try { await firestore().collection('users').doc(ph).set({ deletionNoticeShown: true }, { merge: true }); } catch(_) {}
+                  }}]
+                );
+              }, 800);
             }
 
             // ── Auto-reactivate if user previously deactivated their account

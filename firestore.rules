@@ -137,6 +137,14 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // ── DELETED ACCOUNTS (Apple 5.1.1(v) audit trail) ──────
+    // Written by Cloud Function on successful account deletion.
+    // Read by Customer App on login to show 'fresh account' warning.
+    match /deleted_accounts/{phone} {
+      allow read:   if request.auth != null; // client reads after login
+      allow write:  if false;                // server-side only (Admin SDK bypasses)
+    }
+
     // ── DEFAULT: deny everything else ──────────────────────
     match /{document=**} {
       allow read, write: if false;
