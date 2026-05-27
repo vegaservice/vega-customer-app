@@ -22,6 +22,7 @@ import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
   StatusBar, ScrollView, Alert, SafeAreaView, Dimensions,
   Animated, Modal, ActivityIndicator, Platform, Image,
+  Keyboard, KeyboardAvoidingView, TouchableWithoutFeedback, Linking,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import messaging from '@react-native-firebase/messaging';
@@ -1071,7 +1072,7 @@ try {
 // ════════════════════════════════════════════════════════════════
 const submitBugReport = async (context, description, severity) => {
   try {
-    await firestore().collection('bug_reports').add({
+    const ref = await firestore().collection('bug_reports').add({
       app: 'customer',
       description: (description || '').trim(),
       severity: severity || 'normal',
@@ -1083,10 +1084,12 @@ const submitBugReport = async (context, description, severity) => {
         version: Platform.Version,
       },
     });
-    return true;
+    // Short, human-readable bug ID (last 6 chars of Firestore doc ID) for WhatsApp matching
+    const bugId = 'BUG-' + ref.id.slice(-6).toUpperCase();
+    return { ok: true, bugId };
   } catch (e) {
     console.log('submitBugReport error:', e.message);
-    return false;
+    return { ok: false };
   }
 };
 
@@ -1117,17 +1120,43 @@ const BugReportModal = ({ visible, onClose, onSubmit, context }) => {
     if (!visible) { setDesc(''); setSeverity('normal'); setSubmitting(false); }
   }, [visible]);
 
+  // Open WhatsApp to send screenshot to support — bug ID prefilled in message
+  const shareToWhatsApp = (bugId) => {
+    const msg = encodeURIComponent(
+      `Hi VEGA support,\n\nBug Report ID: ${bugId || 'unknown'}\nScreen: ${context.currentScreen || 'unknown'}\n\n📸 Screenshot attached above.\n\n(Sent from VEGA app)`
+    );
+    // wa.me works on both iOS and Android, opens WhatsApp if installed
+    const url = `https://wa.me/919441270570?text=${msg}`;
+    Linking.openURL(url).catch(() => {
+      Alert.alert('WhatsApp not installed', `Please send your screenshot to +91 9441270570 mentioning Bug ID: ${bugId}`);
+    });
+  };
+
   const send = async () => {
     if (desc.trim().length < 5) {
       Alert.alert('Need a description', 'Please describe the issue in at least 5 characters');
       return;
     }
+    Keyboard.dismiss();
     setSubmitting(true);
-    const ok = await onSubmit(context, desc, severity);
+    const result = await onSubmit(context, desc, severity);
     setSubmitting(false);
+    // onSubmit may return either { ok, bugId } or a boolean — handle both
+    const ok    = typeof result === 'object' ? result?.ok    : result;
+    const bugId = typeof result === 'object' ? result?.bugId : null;
     if (ok) {
-      Alert.alert('🐛 Bug Report Sent', 'Thank you! Our team will look into it. (Report saved to Firestore bug_reports)');
       onClose();
+      // Give the modal a moment to close before showing the success prompt
+      setTimeout(() => {
+        Alert.alert(
+          '🐛 Bug Sent — Want to attach a screenshot?',
+          `Bug ID: ${bugId || 'saved'}\n\n📸 To attach a screenshot:\n1. Take a phone screenshot now (Power + Volume Up)\n2. Tap "Send via WhatsApp" below\n3. Pick that screenshot in WhatsApp\n\nWe'll match it to your bug ID and look into it.`,
+          [
+            { text: 'Skip', style: 'cancel' },
+            { text: '💬 Send via WhatsApp', onPress: () => shareToWhatsApp(bugId) },
+          ]
+        );
+      }, 350);
     } else {
       Alert.alert('Failed to send', 'Could not save the report. Check your internet and try again.');
     }
@@ -1135,66 +1164,80 @@ const BugReportModal = ({ visible, onClose, onSubmit, context }) => {
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' }}>
-        <View style={{ backgroundColor: '#FEFCF8', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 20, paddingBottom: 32 }}>
-          <View style={{ width: 40, height: 4, backgroundColor: '#E8DDD4', borderRadius: 2, alignSelf: 'center', marginBottom: 14 }} />
-          <Text style={{ fontSize: 18, fontWeight: '700', color: '#18080A', marginBottom: 4 }}>🐛 Report a Bug</Text>
-          <Text style={{ fontSize: 12, color: '#7A6048', marginBottom: 14 }}>
-            We auto-capture screen, user, booking, and device info — just describe what went wrong.
-          </Text>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        style={{ flex: 1 }}>
+        <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
+          <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' }}>
+            {/* Inner content — tap-outside dismisses keyboard but tapping inside doesn't close modal */}
+            <TouchableWithoutFeedback onPress={() => {}} accessible={false}>
+              <View style={{ backgroundColor: '#FEFCF8', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 20, paddingBottom: 32 }}>
+                <View style={{ width: 40, height: 4, backgroundColor: '#E8DDD4', borderRadius: 2, alignSelf: 'center', marginBottom: 14 }} />
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                  <Text style={{ fontSize: 18, fontWeight: '700', color: '#18080A' }}>🐛 Report a Bug</Text>
+                  <TouchableOpacity onPress={Keyboard.dismiss} style={{ paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, backgroundColor: '#F0E8DC' }}>
+                    <Text style={{ fontSize: 11, fontWeight: '700', color: '#7A6048' }}>⌨️ Done</Text>
+                  </TouchableOpacity>
+                </View>
+                <Text style={{ fontSize: 12, color: '#7A6048', marginBottom: 14 }}>
+                  We auto-capture screen, user, booking, and device info — just describe what went wrong.
+                </Text>
 
-          <Text style={{ fontSize: 12, fontWeight: '600', color: '#18080A', marginBottom: 6 }}>Severity</Text>
-          <View style={{ flexDirection: 'row', gap: 8, marginBottom: 14 }}>
-            {[
-              { id: 'low',     label: '🟢 Minor',    color: '#1E6B3A' },
-              { id: 'normal',  label: '🟠 Normal',   color: '#C8541A' },
-              { id: 'high',    label: '🔴 Critical', color: '#B02818' },
-            ].map(s => (
-              <TouchableOpacity key={s.id}
-                onPress={() => setSeverity(s.id)}
-                style={{
-                  flex: 1, paddingVertical: 10, borderRadius: 12,
-                  backgroundColor: severity === s.id ? s.color : '#FFF',
-                  borderWidth: 1, borderColor: severity === s.id ? s.color : '#E8DDD4',
-                  alignItems: 'center',
-                }}>
-                <Text style={{ fontSize: 11, fontWeight: '700', color: severity === s.id ? '#FFF' : '#18080A' }}>{s.label}</Text>
-              </TouchableOpacity>
-            ))}
+                <Text style={{ fontSize: 12, fontWeight: '600', color: '#18080A', marginBottom: 6 }}>Severity</Text>
+                <View style={{ flexDirection: 'row', gap: 8, marginBottom: 14 }}>
+                  {[
+                    { id: 'low',     label: '🟢 Minor',    color: '#1E6B3A' },
+                    { id: 'normal',  label: '🟠 Normal',   color: '#C8541A' },
+                    { id: 'high',    label: '🔴 Critical', color: '#B02818' },
+                  ].map(s => (
+                    <TouchableOpacity key={s.id}
+                      onPress={() => setSeverity(s.id)}
+                      style={{
+                        flex: 1, paddingVertical: 10, borderRadius: 12,
+                        backgroundColor: severity === s.id ? s.color : '#FFF',
+                        borderWidth: 1, borderColor: severity === s.id ? s.color : '#E8DDD4',
+                        alignItems: 'center',
+                      }}>
+                      <Text style={{ fontSize: 11, fontWeight: '700', color: severity === s.id ? '#FFF' : '#18080A' }}>{s.label}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+
+                <Text style={{ fontSize: 12, fontWeight: '600', color: '#18080A', marginBottom: 6 }}>What went wrong?</Text>
+                <TextInput
+                  multiline
+                  placeholder="Example: 'Tapped Confirm Booking but nothing happened' OR 'Payment screen shows wrong amount ₹178 instead of ₹149'"
+                  value={desc}
+                  onChangeText={setDesc}
+                  blurOnSubmit={true}
+                  returnKeyType="done"
+                  style={{
+                    borderWidth: 1, borderColor: '#E8DDD4', borderRadius: 14,
+                    padding: 14, fontSize: 14, color: '#18080A',
+                    minHeight: 100, textAlignVertical: 'top', marginBottom: 14,
+                  }}
+                />
+
+                <View style={{ backgroundColor: '#FAF5EE', borderRadius: 10, padding: 10, marginBottom: 14 }}>
+                  <Text style={{ fontSize: 10, color: '#7A6048' }}>📎 Auto-attached: screen={context.currentScreen || 'unknown'}, tab={context.currentTab || '-'}, user={context.userPhone || 'guest'}, booking={context.currentBookingId || 'none'}</Text>
+                  <Text style={{ fontSize: 10, color: '#1E6B3A', marginTop: 6, fontWeight: '600' }}>📸 After sending, you'll get an option to share a screenshot via WhatsApp.</Text>
+                </View>
+
+                <View style={{ flexDirection: 'row', gap: 10 }}>
+                  <TouchableOpacity onPress={() => { Keyboard.dismiss(); onClose(); }} style={{ flex: 1, padding: 14, borderRadius: 14, borderWidth: 1, borderColor: '#E8DDD4', alignItems: 'center' }}>
+                    <Text style={{ color: '#7A6048', fontWeight: '600' }}>Cancel</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={send} disabled={submitting} style={{ flex: 2, padding: 14, borderRadius: 14, backgroundColor: '#C8541A', alignItems: 'center', opacity: submitting ? 0.5 : 1 }}>
+                    {submitting
+                      ? <ActivityIndicator color="#FFF" />
+                      : <Text style={{ color: '#FFF', fontWeight: '700' }}>Send Report</Text>}
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </TouchableWithoutFeedback>
           </View>
-
-          <Text style={{ fontSize: 12, fontWeight: '600', color: '#18080A', marginBottom: 6 }}>What went wrong?</Text>
-          <TextInput
-            multiline
-            placeholder="Example: 'Tapped Confirm Booking but nothing happened' OR 'Payment screen shows wrong amount ₹178 instead of ₹149'"
-            value={desc}
-            onChangeText={setDesc}
-            style={{
-              borderWidth: 1, borderColor: '#E8DDD4', borderRadius: 14,
-              padding: 14, fontSize: 14, color: '#18080A',
-              minHeight: 100, textAlignVertical: 'top', marginBottom: 14,
-            }}
-          />
-
-          <View style={{ backgroundColor: '#FAF5EE', borderRadius: 10, padding: 10, marginBottom: 14 }}>
-            <Text style={{ fontSize: 10, color: '#7A6048' }}>📎 Auto-attached: screen={context.currentScreen || 'unknown'}, tab={context.currentTab || '-'}, user={context.userPhone || 'guest'}, booking={context.currentBookingId || 'none'}</Text>
-          </View>
-
-          <View style={{ flexDirection: 'row', gap: 10 }}>
-            <TouchableOpacity onPress={onClose} style={{ flex: 1, padding: 14, borderRadius: 14, borderWidth: 1, borderColor: '#E8DDD4', alignItems: 'center' }}>
-              <Text style={{ color: '#7A6048', fontWeight: '600' }}>Cancel</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={send} disabled={submitting} style={{ flex: 2, padding: 14, borderRadius: 14, backgroundColor: '#C8541A', alignItems: 'center', opacity: submitting ? 0.5 : 1 }}>
-              {submitting
-                ? <ActivityIndicator color="#FFF" />
-                : <Text style={{ color: '#FFF', fontWeight: '700' }}>Send Report</Text>}
-            </TouchableOpacity>
-          </View>
-          <Text style={{ fontSize: 9, color: '#9D8068', textAlign: 'center', marginTop: 8 }}>
-            Tip: After tapping Send, take a phone screenshot and share it with us via WhatsApp/email for visual context.
-          </Text>
-        </View>
-      </View>
+        </TouchableWithoutFeedback>
+      </KeyboardAvoidingView>
     </Modal>
   );
 };
