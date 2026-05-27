@@ -43,7 +43,7 @@ import * as Updates from 'expo-updates';
 
 // OTA build label — bump this every release so user can verify which build is loaded.
 // Increment the number whenever you ship a new OTA so the user knows it landed.
-const OTA_BUILD_LABEL = 'v12 · 27-May · ManageAccount-Fix';
+const OTA_BUILD_LABEL = 'v13 · 27-May · Unified-Modal-StateMachine';
 
 // ── Firestore Service Functions (inline — no separate file needed) ──
 const createOrUpdateUser = async (phone, data) => {
@@ -1435,12 +1435,21 @@ export default function App() {
   );
 
   // ── Apple 5.1.1(v): Account Deletion / Deactivation state ────────────
-  const [showAccountManageModal, setShowAccountManageModal] = useState(false);
-  const [showDeleteAccountModal, setShowDeleteAccountModal] = useState(false);
-  const [showDeactivateModal, setShowDeactivateModal]       = useState(false);
-  const [deleteConfirmText, setDeleteConfirmText]           = useState('');
-  const [deletingAccount, setDeletingAccount]               = useState(false);
-  const [deactivating, setDeactivating]                     = useState(false);
+  // SINGLE modal with mode state machine — switching content is just a re-render,
+  // so iOS never needs to close+open a native Modal which previously caused the
+  // "tap Delete Forever → nothing happens" / app-stuck bug (modal handoff loss).
+  // accountMode = null | 'chooser' | 'delete' | 'deactivate'
+  const [accountMode, setAccountMode]                 = useState(null);
+  const [deleteConfirmText, setDeleteConfirmText]     = useState('');
+  const [deletingAccount, setDeletingAccount]         = useState(false);
+  const [deactivating, setDeactivating]               = useState(false);
+  // Back-compat shims — keep old setter API working for any callsite that still uses it
+  const setShowAccountManageModal = (v) => setAccountMode(v ? 'chooser' : (m => m === 'chooser' ? null : m));
+  const setShowDeleteAccountModal = (v) => setAccountMode(v ? 'delete'  : (m => m === 'delete'  ? null : m));
+  const setShowDeactivateModal    = (v) => setAccountMode(v ? 'deactivate' : (m => m === 'deactivate' ? null : m));
+  const showAccountManageModal = accountMode === 'chooser';
+  const showDeleteAccountModal = accountMode === 'delete';
+  const showDeactivateModal    = accountMode === 'deactivate';
 
   // ── Razorpay config state (loaded from Firestore app_config/payment) ──
   // Admin updates this doc in Firebase Console to swap test↔live keys
@@ -4692,8 +4701,9 @@ export default function App() {
           {/* Apple 5.1.1(v): Account Management — visible card with Deactivate / Delete */}
           {user && (
             <TouchableOpacity
+              activeOpacity={0.7}
               style={{flexDirection:'row',alignItems:'center',backgroundColor:'#FFF5F0',borderWidth:1,borderColor:'#E8C0B5',borderRadius:18,padding:14,marginTop:10,marginBottom:14}}
-              onPress={()=>setShowAccountManageModal(true)}>
+              onPress={() => setAccountMode('chooser')}>
               <View style={{width:42,height:42,borderRadius:13,backgroundColor:'rgba(176,40,24,0.10)',alignItems:'center',justifyContent:'center',marginRight:14,borderWidth:0.5,borderColor:'#B02818'}}>
                 <Text style={{fontSize:20}}>⚙️</Text>
               </View>
@@ -4915,187 +4925,193 @@ export default function App() {
       {/* 🐛 Floating Bug Report — visible across all main tabs */}
       <BugFAB/>
 
-      {/* Account Management chooser modal — Deactivate or Delete (Profile tab) */}
-      <Modal visible={showAccountManageModal} transparent animationType="fade" onRequestClose={()=>setShowAccountManageModal(false)}>
-        <View style={{flex:1,backgroundColor:'rgba(0,0,0,0.6)',justifyContent:'center',padding:24}}>
-          <View style={{backgroundColor:'#FFF',borderRadius:20,padding:22}}>
-            <Text style={{fontWeight:'800',fontSize:18,color:C.text,marginBottom:6,textAlign:'center'}}>Manage Account</Text>
-            <Text style={{color:C.muted,fontSize:12,marginBottom:18,textAlign:'center'}}>Choose what you'd like to do</Text>
+      {/* UNIFIED Account Management modal — one native Modal, content switches by mode.
+          Prevents the iOS modal-stacking handoff bug that caused "tap → app stuck". */}
+      <Modal
+        visible={!!accountMode}
+        transparent
+        animationType="fade"
+        onRequestClose={() => {
+          if (deletingAccount || deactivating) return;   // don't dismiss mid-network call
+          setAccountMode(null);
+        }}>
+        <View style={{flex:1,backgroundColor:'rgba(0,0,0,0.65)',justifyContent:'center',padding:22}}>
+          {/* ── CHOOSER VIEW ─────────────────────────────────────────────── */}
+          {accountMode === 'chooser' && (
+            <View style={{backgroundColor:'#FFF',borderRadius:20,padding:22}}>
+              <Text style={{fontWeight:'800',fontSize:18,color:C.text,marginBottom:6,textAlign:'center'}}>Manage Account</Text>
+              <Text style={{color:C.muted,fontSize:12,marginBottom:18,textAlign:'center'}}>Choose what you'd like to do</Text>
 
-            <TouchableOpacity
-              onPress={()=>{ setShowAccountManageModal(false); setTimeout(()=>setShowDeactivateModal(true), 250); }}
-              style={{borderWidth:1,borderColor:'#D4A20A',borderRadius:14,padding:14,marginBottom:10,flexDirection:'row',alignItems:'center',backgroundColor:'rgba(212,162,10,0.06)'}}>
-              <View style={{width:36,height:36,borderRadius:18,backgroundColor:'rgba(212,162,10,0.15)',alignItems:'center',justifyContent:'center',marginRight:12}}>
-                <Text style={{fontSize:18}}>⏸️</Text>
-              </View>
-              <View style={{flex:1}}>
-                <Text style={{color:'#8A6A0A',fontWeight:'700',fontSize:14}}>Deactivate</Text>
-                <Text style={{color:C.muted,fontSize:11,marginTop:2}}>Pause your account. Sign in anytime to reactivate.</Text>
-              </View>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              onPress={()=>{ setShowAccountManageModal(false); setDeleteConfirmText(''); setTimeout(()=>setShowDeleteAccountModal(true), 250); }}
-              style={{borderWidth:1,borderColor:'#B02818',borderRadius:14,padding:14,marginBottom:14,flexDirection:'row',alignItems:'center',backgroundColor:'rgba(176,40,24,0.05)'}}>
-              <View style={{width:36,height:36,borderRadius:18,backgroundColor:'rgba(176,40,24,0.12)',alignItems:'center',justifyContent:'center',marginRight:12}}>
-                <Text style={{fontSize:18}}>🗑️</Text>
-              </View>
-              <View style={{flex:1}}>
-                <Text style={{color:'#B02818',fontWeight:'700',fontSize:14}}>Delete Forever</Text>
-                <Text style={{color:C.muted,fontSize:11,marginTop:2}}>Permanently remove your account and personal data.</Text>
-              </View>
-            </TouchableOpacity>
-
-            <TouchableOpacity onPress={()=>setShowAccountManageModal(false)} style={{padding:12,borderRadius:12,alignItems:'center'}}>
-              <Text style={{color:C.muted,fontWeight:'600',fontSize:14}}>Cancel</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-
-      {/* Delete Account confirmation modal — type DELETE to confirm (Apple 5.1.1(v)) */}
-      <Modal visible={showDeleteAccountModal} transparent animationType="slide" onRequestClose={() => !deletingAccount && setShowDeleteAccountModal(false)}>
-        <View style={{flex:1,backgroundColor:'rgba(0,0,0,0.7)',justifyContent:'center',padding:20}}>
-          <View style={{backgroundColor:'#FFF',borderRadius:20,padding:24}}>
-            <View style={{alignItems:'center',marginBottom:14}}>
-              <View style={{width:60,height:60,borderRadius:30,backgroundColor:'rgba(176,40,24,0.10)',alignItems:'center',justifyContent:'center',marginBottom:10}}>
-                <Text style={{fontSize:30}}>⚠️</Text>
-              </View>
-              <Text style={{fontWeight:'800',fontSize:19,color:'#B02818'}}>Delete Account?</Text>
-            </View>
-            <Text style={{fontSize:13,color:'#3A1A0A',marginBottom:12,lineHeight:19}}>This will permanently delete:</Text>
-            <Text style={{fontSize:12,color:'#5A4030',marginBottom:14,lineHeight:18}}>
-              • Your profile (name, phone, wallet balance){'\n'}
-              • All saved addresses{'\n'}
-              • All wallet transaction history{'\n'}
-              • Pending bookings will be cancelled{'\n'}
-              • Past completed bookings will be anonymized (kept for our accounting records but no longer linked to you)
-            </Text>
-            <View style={{backgroundColor:'#FFF5F0',borderRadius:10,padding:10,marginBottom:14,borderWidth:0.5,borderColor:'#B02818'}}>
-              <Text style={{fontSize:11,color:'#B02818',fontWeight:'700'}}>⚠️ This cannot be undone.</Text>
-              <Text style={{fontSize:10,color:'#7A4030',marginTop:3}}>To re-use VEGA later, you'd have to create a new account.</Text>
-            </View>
-            <Text style={{fontSize:12,fontWeight:'600',color:'#3A1A0A',marginBottom:6}}>Type DELETE to confirm:</Text>
-            <TextInput
-              value={deleteConfirmText}
-              onChangeText={setDeleteConfirmText}
-              placeholder="DELETE"
-              autoCapitalize="characters"
-              editable={!deletingAccount}
-              style={{borderWidth:1,borderColor:'#E8DDD4',borderRadius:12,padding:12,fontSize:14,color:'#18080A',marginBottom:14,letterSpacing:2}}
-            />
-            <View style={{flexDirection:'row',gap:10}}>
               <TouchableOpacity
-                disabled={deletingAccount}
-                onPress={()=>{ setShowDeleteAccountModal(false); setDeleteConfirmText(''); }}
-                style={{flex:1,padding:14,borderRadius:14,borderWidth:1,borderColor:'#E8DDD4',alignItems:'center',opacity:deletingAccount?0.5:1}}>
-                <Text style={{color:'#3A1A0A',fontWeight:'600'}}>Cancel</Text>
+                activeOpacity={0.7}
+                onPress={() => setAccountMode('deactivate')}
+                style={{borderWidth:1,borderColor:'#D4A20A',borderRadius:14,padding:14,marginBottom:10,flexDirection:'row',alignItems:'center',backgroundColor:'rgba(212,162,10,0.06)'}}>
+                <View style={{width:36,height:36,borderRadius:18,backgroundColor:'rgba(212,162,10,0.15)',alignItems:'center',justifyContent:'center',marginRight:12}}>
+                  <Text style={{fontSize:18}}>⏸️</Text>
+                </View>
+                <View style={{flex:1}}>
+                  <Text style={{color:'#8A6A0A',fontWeight:'700',fontSize:14}}>Deactivate</Text>
+                  <Text style={{color:C.muted,fontSize:11,marginTop:2}}>Pause your account. Sign in anytime to reactivate.</Text>
+                </View>
               </TouchableOpacity>
+
               <TouchableOpacity
-                disabled={deletingAccount || deleteConfirmText.trim().toUpperCase() !== 'DELETE'}
-                onPress={async ()=>{
-                  if (deleteConfirmText.trim().toUpperCase() !== 'DELETE') return;
-                  setDeletingAccount(true);
-                  const phoneForDelete = phone;
-                  const result = await deleteUserAccount(phoneForDelete);
-                  setDeletingAccount(false);
-                  if (result.ok) {
+                activeOpacity={0.7}
+                onPress={() => { setDeleteConfirmText(''); setAccountMode('delete'); }}
+                style={{borderWidth:1,borderColor:'#B02818',borderRadius:14,padding:14,marginBottom:14,flexDirection:'row',alignItems:'center',backgroundColor:'rgba(176,40,24,0.05)'}}>
+                <View style={{width:36,height:36,borderRadius:18,backgroundColor:'rgba(176,40,24,0.12)',alignItems:'center',justifyContent:'center',marginRight:12}}>
+                  <Text style={{fontSize:18}}>🗑️</Text>
+                </View>
+                <View style={{flex:1}}>
+                  <Text style={{color:'#B02818',fontWeight:'700',fontSize:14}}>Delete Forever</Text>
+                  <Text style={{color:C.muted,fontSize:11,marginTop:2}}>Permanently remove your account and personal data.</Text>
+                </View>
+              </TouchableOpacity>
+
+              <TouchableOpacity activeOpacity={0.7} onPress={() => setAccountMode(null)} style={{padding:12,borderRadius:12,alignItems:'center'}}>
+                <Text style={{color:C.muted,fontWeight:'600',fontSize:14}}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {/* ── DELETE CONFIRM VIEW ──────────────────────────────────────── */}
+          {accountMode === 'delete' && (
+            <View style={{backgroundColor:'#FFF',borderRadius:20,padding:24}}>
+              <View style={{alignItems:'center',marginBottom:14}}>
+                <View style={{width:60,height:60,borderRadius:30,backgroundColor:'rgba(176,40,24,0.10)',alignItems:'center',justifyContent:'center',marginBottom:10}}>
+                  <Text style={{fontSize:30}}>⚠️</Text>
+                </View>
+                <Text style={{fontWeight:'800',fontSize:19,color:'#B02818'}}>Delete Account?</Text>
+              </View>
+              <Text style={{fontSize:13,color:'#3A1A0A',marginBottom:12,lineHeight:19}}>This will permanently delete:</Text>
+              <Text style={{fontSize:12,color:'#5A4030',marginBottom:14,lineHeight:18}}>
+                • Your profile (name, phone, wallet balance){'\n'}
+                • All saved addresses{'\n'}
+                • All wallet transaction history{'\n'}
+                • Pending bookings will be cancelled{'\n'}
+                • Past completed bookings will be anonymized
+              </Text>
+              <View style={{backgroundColor:'#FFF5F0',borderRadius:10,padding:10,marginBottom:14,borderWidth:0.5,borderColor:'#B02818'}}>
+                <Text style={{fontSize:11,color:'#B02818',fontWeight:'700'}}>⚠️ This cannot be undone.</Text>
+              </View>
+              <Text style={{fontSize:12,fontWeight:'600',color:'#3A1A0A',marginBottom:6}}>Type DELETE to confirm:</Text>
+              <TextInput
+                value={deleteConfirmText}
+                onChangeText={setDeleteConfirmText}
+                placeholder="DELETE"
+                autoCapitalize="characters"
+                editable={!deletingAccount}
+                style={{borderWidth:1,borderColor:'#E8DDD4',borderRadius:12,padding:12,fontSize:14,color:'#18080A',marginBottom:14,letterSpacing:2}}
+              />
+              <View style={{flexDirection:'row',gap:10}}>
+                <TouchableOpacity
+                  activeOpacity={0.7}
+                  disabled={deletingAccount}
+                  onPress={() => { setDeleteConfirmText(''); setAccountMode('chooser'); }}
+                  style={{flex:1,padding:14,borderRadius:14,borderWidth:1,borderColor:'#E8DDD4',alignItems:'center',opacity:deletingAccount?0.5:1}}>
+                  <Text style={{color:'#3A1A0A',fontWeight:'600'}}>Back</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  activeOpacity={0.7}
+                  disabled={deletingAccount || deleteConfirmText.trim().toUpperCase() !== 'DELETE'}
+                  onPress={async () => {
+                    if (deleteConfirmText.trim().toUpperCase() !== 'DELETE') return;
+                    setDeletingAccount(true);
+                    const phoneForDelete = phone;
+                    const result = await deleteUserAccount(phoneForDelete);
+                    setDeletingAccount(false);
+                    // Always sign out + close modal regardless of result
                     if (ordersUnsub) ordersUnsub();
                     if (addrsUnsub) addrsUnsub();
                     setOrdersUnsub(null); setAddrsUnsub(null);
                     setSavedAddrs([]); setOrders([]); setUser(null);
                     setPhone(''); setOtpVal(''); setConfirm(null);
-                    setShowDeleteAccountModal(false); setDeleteConfirmText('');
+                    setAccountMode(null); setDeleteConfirmText('');
                     setScreen('login');
-                    const lines = [
-                      'Your VEGA account and all personal data have been permanently removed.',
-                      '',
-                      `• Active bookings cancelled: ${result.cancelledBookings || 0}`,
-                      `• Past bookings anonymized: ${result.anonymizedBookings || 0}`,
-                      `• Addresses deleted: ${result.deletedAddresses || 0}`,
-                      `• Wallet history deleted: ${result.deletedWalletTxns || 0}`,
-                      `• Profile deleted: ${result.deletedUserDoc ? 'Yes' : 'No'}`,
-                      `• Login record deleted: ${result.deletedAuthUser ? 'Yes' : 'No'}`,
-                    ];
-                    if (result.serverErrors && result.serverErrors.length > 0) {
-                      lines.push('', 'Partial: ' + result.serverErrors.join('; '));
+                    if (result.ok) {
+                      const lines = [
+                        'Your account and personal data have been permanently removed.',
+                        '',
+                        `• Active bookings cancelled: ${result.cancelledBookings || 0}`,
+                        `• Past bookings anonymized: ${result.anonymizedBookings || 0}`,
+                        `• Addresses deleted: ${result.deletedAddresses || 0}`,
+                        `• Wallet history deleted: ${result.deletedWalletTxns || 0}`,
+                        `• Profile deleted: ${result.deletedUserDoc ? 'Yes' : 'No'}`,
+                        `• Login record deleted: ${result.deletedAuthUser ? 'Yes' : 'No'}`,
+                      ];
+                      if (result.serverErrors && result.serverErrors.length > 0) {
+                        lines.push('', 'Partial: ' + result.serverErrors.join('; '));
+                      }
+                      Alert.alert('✅ Account Deleted', lines.join('\n'));
+                    } else {
+                      Alert.alert('Could not complete deletion', `${result.error || 'Unknown error'}\n\nYou have been signed out. Please try again or contact hello@vegavizag.in for help.`);
                     }
-                    Alert.alert('✅ Account Deleted', lines.join('\n'));
-                  } else {
-                    if (ordersUnsub) ordersUnsub();
-                    if (addrsUnsub) addrsUnsub();
-                    setOrdersUnsub(null); setAddrsUnsub(null);
-                    setSavedAddrs([]); setOrders([]); setUser(null);
-                    setPhone(''); setOtpVal(''); setConfirm(null);
-                    setShowDeleteAccountModal(false); setDeleteConfirmText('');
-                    setScreen('login');
-                    Alert.alert('Could not complete deletion', `${result.error || 'Unknown error'}\n\nYou have been signed out. Please try again or contact hello@vegavizag.in for help.`);
-                  }
-                }}
-                style={{
-                  flex:2,padding:14,borderRadius:14,alignItems:'center',
-                  backgroundColor: deleteConfirmText.trim().toUpperCase()==='DELETE' ? '#B02818' : '#E8C0B5',
-                  opacity: deletingAccount ? 0.6 : 1,
-                }}>
-                {deletingAccount
-                  ? <ActivityIndicator color="#FFF"/>
-                  : <Text style={{color:'#FFF',fontWeight:'800'}}>🗑️ Delete Forever</Text>}
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
-
-      {/* Deactivate confirmation modal */}
-      <Modal visible={showDeactivateModal} transparent animationType="slide" onRequestClose={()=>!deactivating && setShowDeactivateModal(false)}>
-        <View style={{flex:1,backgroundColor:'rgba(0,0,0,0.6)',justifyContent:'center',padding:24}}>
-          <View style={{backgroundColor:'#FFF',borderRadius:20,padding:22}}>
-            <View style={{alignItems:'center',marginBottom:12}}>
-              <View style={{width:56,height:56,borderRadius:28,backgroundColor:'rgba(212,162,10,0.12)',alignItems:'center',justifyContent:'center',marginBottom:10}}>
-                <Text style={{fontSize:28}}>⏸️</Text>
+                  }}
+                  style={{
+                    flex:2,padding:14,borderRadius:14,alignItems:'center',
+                    backgroundColor: deleteConfirmText.trim().toUpperCase()==='DELETE' ? '#B02818' : '#E8C0B5',
+                    opacity: deletingAccount ? 0.6 : 1,
+                  }}>
+                  {deletingAccount
+                    ? <ActivityIndicator color="#FFF"/>
+                    : <Text style={{color:'#FFF',fontWeight:'800'}}>🗑️ Delete Forever</Text>}
+                </TouchableOpacity>
               </View>
-              <Text style={{fontWeight:'800',fontSize:18,color:'#8A6A0A'}}>Deactivate Account?</Text>
             </View>
-            <Text style={{fontSize:13,color:C.text,marginBottom:10,lineHeight:19}}>Your account will be paused:</Text>
-            <Text style={{fontSize:12,color:'#5A4030',marginBottom:14,lineHeight:18}}>
-              • You will be signed out{'\n'}
-              • Your data (bookings, wallet, addresses) stays safe{'\n'}
-              • Sign in again anytime to reactivate
-            </Text>
-            <View style={{flexDirection:'row',gap:10}}>
-              <TouchableOpacity
-                disabled={deactivating}
-                onPress={()=>setShowDeactivateModal(false)}
-                style={{flex:1,padding:14,borderRadius:14,borderWidth:1,borderColor:C.border,alignItems:'center',opacity:deactivating?0.5:1}}>
-                <Text style={{color:C.text,fontWeight:'600'}}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                disabled={deactivating}
-                onPress={async()=>{
-                  setDeactivating(true);
-                  const phoneForDeact = phone;
-                  const result = await deactivateUserAccount(phoneForDeact);
-                  setDeactivating(false);
-                  if (result.ok) {
-                    if (ordersUnsub) ordersUnsub();
-                    if (addrsUnsub) addrsUnsub();
-                    setOrdersUnsub(null); setAddrsUnsub(null);
-                    setSavedAddrs([]); setOrders([]); setUser(null);
-                    setPhone(''); setOtpVal(''); setConfirm(null);
-                    setShowDeactivateModal(false);
-                    setScreen('login');
-                    Alert.alert('Account Deactivated', 'Sign in anytime to reactivate your account.');
-                  } else {
-                    Alert.alert('Could not deactivate', result.error || 'Please try again.');
-                  }
-                }}
-                style={{flex:2,padding:14,borderRadius:14,alignItems:'center',backgroundColor:'#D4A20A',opacity:deactivating?0.6:1}}>
-                {deactivating
-                  ? <ActivityIndicator color="#FFF"/>
-                  : <Text style={{color:'#FFF',fontWeight:'800'}}>⏸️ Deactivate</Text>}
-              </TouchableOpacity>
+          )}
+
+          {/* ── DEACTIVATE CONFIRM VIEW ──────────────────────────────────── */}
+          {accountMode === 'deactivate' && (
+            <View style={{backgroundColor:'#FFF',borderRadius:20,padding:22}}>
+              <View style={{alignItems:'center',marginBottom:12}}>
+                <View style={{width:56,height:56,borderRadius:28,backgroundColor:'rgba(212,162,10,0.12)',alignItems:'center',justifyContent:'center',marginBottom:10}}>
+                  <Text style={{fontSize:28}}>⏸️</Text>
+                </View>
+                <Text style={{fontWeight:'800',fontSize:18,color:'#8A6A0A'}}>Deactivate Account?</Text>
+              </View>
+              <Text style={{fontSize:13,color:C.text,marginBottom:10,lineHeight:19}}>Your account will be paused:</Text>
+              <Text style={{fontSize:12,color:'#5A4030',marginBottom:14,lineHeight:18}}>
+                • You will be signed out{'\n'}
+                • Your data (bookings, wallet, addresses) stays safe{'\n'}
+                • Sign in again anytime to reactivate
+              </Text>
+              <View style={{flexDirection:'row',gap:10}}>
+                <TouchableOpacity
+                  activeOpacity={0.7}
+                  disabled={deactivating}
+                  onPress={() => setAccountMode('chooser')}
+                  style={{flex:1,padding:14,borderRadius:14,borderWidth:1,borderColor:C.border,alignItems:'center',opacity:deactivating?0.5:1}}>
+                  <Text style={{color:C.text,fontWeight:'600'}}>Back</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  activeOpacity={0.7}
+                  disabled={deactivating}
+                  onPress={async () => {
+                    setDeactivating(true);
+                    const phoneForDeact = phone;
+                    const result = await deactivateUserAccount(phoneForDeact);
+                    setDeactivating(false);
+                    if (result.ok) {
+                      if (ordersUnsub) ordersUnsub();
+                      if (addrsUnsub) addrsUnsub();
+                      setOrdersUnsub(null); setAddrsUnsub(null);
+                      setSavedAddrs([]); setOrders([]); setUser(null);
+                      setPhone(''); setOtpVal(''); setConfirm(null);
+                      setAccountMode(null);
+                      setScreen('login');
+                      Alert.alert('Account Deactivated', 'Sign in anytime to reactivate your account.');
+                    } else {
+                      Alert.alert('Could not deactivate', result.error || 'Please try again.');
+                    }
+                  }}
+                  style={{flex:2,padding:14,borderRadius:14,alignItems:'center',backgroundColor:'#D4A20A',opacity:deactivating?0.6:1}}>
+                  {deactivating
+                    ? <ActivityIndicator color="#FFF"/>
+                    : <Text style={{color:'#FFF',fontWeight:'800'}}>⏸️ Deactivate</Text>}
+                </TouchableOpacity>
+              </View>
             </View>
-          </View>
+          )}
         </View>
       </Modal>
     </View>
