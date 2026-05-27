@@ -39,6 +39,11 @@ import { WebView } from 'react-native-webview';
 // ── Firebase (ACTIVATED — Production mode)
 import auth from '@react-native-firebase/auth';
 import firestore from '@react-native-firebase/firestore';
+import * as Updates from 'expo-updates';
+
+// OTA build label — bump this every release so user can verify which build is loaded.
+// Increment the number whenever you ship a new OTA so the user knows it landed.
+const OTA_BUILD_LABEL = 'v10 · 27-May · Delete-Cloud-Fn';
 
 // ── Firestore Service Functions (inline — no separate file needed) ──
 const createOrUpdateUser = async (phone, data) => {
@@ -1200,6 +1205,31 @@ const BugReportModal = ({ visible, onClose, onSubmit, context }) => {
   );
 };
 
+// 🔄 Force-apply OTA updates on next launch when a new version is detected.
+// Without this, expo-updates loads the cached bundle (instant) and applies the
+// new one only on the NEXT cold start. This caused users to see stale UI for
+// one app session after each OTA. With this helper, the new bundle loads
+// immediately if one is available — at the cost of a brief reload spinner.
+const checkAndApplyOTA = async (silent = true) => {
+  try {
+    if (!Updates.isEnabled) return { applied: false, reason: 'updates_disabled' };
+    const result = await Updates.checkForUpdateAsync();
+    if (result.isAvailable) {
+      await Updates.fetchUpdateAsync();
+      if (!silent) {
+        // Caller wants user-facing prompt before reload
+        return { applied: false, available: true };
+      }
+      await Updates.reloadAsync();   // triggers immediate reload with new bundle
+      return { applied: true };
+    }
+    return { applied: false, available: false };
+  } catch (e) {
+    console.log('OTA check failed:', e.message);
+    return { applied: false, error: e.message };
+  }
+};
+
 export default function App() {
   const [screen,        setScreen]        = useState('splash');
   const [tab,           setTab]           = useState('home');
@@ -1326,6 +1356,15 @@ export default function App() {
   const scaleA = useRef(new Animated.Value(0.85)).current;
   const tabAnim = useRef(new Animated.Value(0)).current;
   const DATES  = getDates();
+
+  // ── OTA: fetch + reload latest bundle on app launch (forces single-restart updates)
+  // Without this, expo-updates only applies new bundles on the SECOND cold start
+  // (loads cached, downloads new in background, applies on next launch).
+  // checkAndApplyOTA forces an immediate reload if an update is available — costs
+  // ~1-2s splash delay but guarantees users always see the latest bundle.
+  useEffect(() => {
+    checkAndApplyOTA(true).catch(() => {});
+  }, []);
 
   useEffect(()=>{
     Animated.parallel([
@@ -4731,14 +4770,42 @@ export default function App() {
           }}>
             <Text style={{color:C.red,fontWeight:'600',fontSize:15}}>Logout</Text>
           </TouchableOpacity>}
-          {/* Apple 5.1.1(v): Account Management — small text link (opens chooser modal) */}
+          {/* Apple 5.1.1(v): Account Management — visible card with Deactivate / Delete */}
           {user && (
             <TouchableOpacity
-              style={{paddingVertical:10,marginTop:14,marginBottom:40,alignItems:'center'}}
+              style={{flexDirection:'row',alignItems:'center',backgroundColor:'#FFF5F0',borderWidth:1,borderColor:'#E8C0B5',borderRadius:18,padding:14,marginTop:10,marginBottom:14}}
               onPress={()=>setShowAccountManageModal(true)}>
-              <Text style={{color:'#9D8068',fontSize:12,textDecorationLine:'underline'}}>Manage Account</Text>
+              <View style={{width:42,height:42,borderRadius:13,backgroundColor:'rgba(176,40,24,0.10)',alignItems:'center',justifyContent:'center',marginRight:14,borderWidth:0.5,borderColor:'#B02818'}}>
+                <Text style={{fontSize:20}}>⚙️</Text>
+              </View>
+              <View style={{flex:1}}>
+                <Text style={{color:'#B02818',fontSize:14,fontWeight:'700'}}>Manage Account</Text>
+                <Text style={{color:'#7A4030',fontSize:11,marginTop:2}}>Deactivate or permanently delete your account</Text>
+              </View>
+              <Text style={{color:'#B02818',fontSize:22}}>›</Text>
             </TouchableOpacity>
           )}
+          {/* Build label — proves which OTA bundle is loaded + manual update check */}
+          <TouchableOpacity
+            onPress={async () => {
+              Alert.alert('Checking for updates...', 'Please wait');
+              const res = await checkAndApplyOTA(false);
+              if (res.applied) return;   // reloaded — won't reach here
+              if (res.available) {
+                Alert.alert('Update Ready', 'Reload now to apply the latest version?', [
+                  { text: 'Later', style: 'cancel' },
+                  { text: 'Reload', onPress: () => Updates.reloadAsync() },
+                ]);
+              } else if (res.error) {
+                Alert.alert('Could not check', res.error);
+              } else {
+                Alert.alert('Up to date', `You're running the latest version.\n\nBuild: ${OTA_BUILD_LABEL}`);
+              }
+            }}
+            style={{paddingVertical:10,marginBottom:30,alignItems:'center'}}>
+            <Text style={{color:'#9D8068',fontSize:10,marginBottom:2}}>Build: {OTA_BUILD_LABEL}</Text>
+            <Text style={{color:'#C8541A',fontSize:11,fontWeight:'600',textDecorationLine:'underline'}}>🔄 Check for Updates</Text>
+          </TouchableOpacity>
           {!user&&<View style={{height:40}}/>}
         </View>
       </ScrollView>
