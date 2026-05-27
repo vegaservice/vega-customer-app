@@ -145,6 +145,16 @@ service cloud.firestore {
       allow write:  if false;                // server-side only (Admin SDK bypasses)
     }
 
+    // ── USER NOTIFICATIONS (in-app banner queue) ───────────
+    // Written by Cloud Functions (e.g., on bug_reports.status='fixed').
+    // Read + marked-read by the Customer App on launch.
+    match /user_notifications/{phone}/items/{notifId} {
+      allow read:   if request.auth != null;
+      allow update: if request.auth != null; // mark `read: true`
+      allow create: if false;                // server-side only
+      allow delete: if false;
+    }
+
     // ── DEFAULT: deny everything else ──────────────────────
     match /{document=**} {
       allow read, write: if false;

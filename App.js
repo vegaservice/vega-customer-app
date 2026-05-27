@@ -43,7 +43,7 @@ import * as Updates from 'expo-updates';
 
 // OTA build label — bump this every release so user can verify which build is loaded.
 // Increment the number whenever you ship a new OTA so the user knows it landed.
-const OTA_BUILD_LABEL = 'v14 · 27-May · Post-Delete-Notice';
+const OTA_BUILD_LABEL = 'v15 · 27-May · BugFix-Banner';
 
 // ── Firestore Service Functions (inline — no separate file needed) ──
 const createOrUpdateUser = async (phone, data) => {
@@ -1377,6 +1377,10 @@ export default function App() {
   const [useWallet,     setUseWallet]     = useState(false);
   const [orders,        setOrders]        = useState([]);
   const [ordersUnsub,   setOrdersUnsub]   = useState(null);
+  // ── In-app notifications (e.g. bug-fixed, server-pushed via user_notifications/{phone}/items)
+  const [userNotifs,    setUserNotifs]    = useState([]);     // [{id, title, body, read, ...}]
+  const [activeNotif,   setActiveNotif]   = useState(null);   // currently displayed banner
+  const [notifsUnsub,   setNotifsUnsub]   = useState(null);
   const [taskCart,      setTaskCart]      = useState({}); // {taskId: count}
   const [activeTask,    setActiveTask]    = useState(null); // for task detail screen
   const [placing,       setPlacing]       = useState(false);
@@ -1589,6 +1593,7 @@ export default function App() {
             // accumulate orphan onSnapshots that leak memory.
             setOrdersUnsub(prev => { if (prev) try { prev(); } catch(_){} return null; });
             setAddrsUnsub(prev  => { if (prev) try { prev(); } catch(_){} return null; });
+            setNotifsUnsub(prev => { if (prev) try { prev(); } catch(_){} return null; });
 
             const unsub = firestore().collection('bookings')
               .where('userId','==',ph).orderBy('createdAt','desc').limit(50)
@@ -1605,6 +1610,23 @@ export default function App() {
                 err => console.error('addresses:', err)
               );
             setAddrsUnsub(()=>unsubAddr);
+
+            // ── In-app notifications listener (bug fixes, server-pushed alerts)
+            // Reads from user_notifications/{phone}/items. New items with read=false
+            // trigger the in-app banner (see <BugFixBanner/> rendered in main screen).
+            const unsubN = firestore().collection('user_notifications').doc(ph)
+              .collection('items').orderBy('createdAt', 'desc').limit(20)
+              .onSnapshot(
+                s => {
+                  const items = s.docs.map(d => ({ id: d.id, ...d.data() }));
+                  setUserNotifs(items);
+                  // Auto-pop the most recent unread item as the active banner
+                  const newest = items.find(n => !n.read);
+                  if (newest) setActiveNotif(newest);
+                },
+                err => console.log('user_notifications listener:', err.message)
+              );
+            setNotifsUnsub(() => unsubN);
           }
         }catch(e){ console.log('session restore:',e); }
       }
@@ -4959,6 +4981,43 @@ export default function App() {
       </View>
       {/* 🐛 Floating Bug Report — visible across all main tabs */}
       <BugFAB/>
+
+      {/* ✅ In-app banner for bug fixes (and other server-pushed notifications).
+          Slides down from the top when a new user_notifications item appears.
+          Tap "Apply Update" → reloads to latest OTA. Tap × → marks read + dismisses. */}
+      {activeNotif && (
+        <View style={{
+          position:'absolute', top:Platform.OS==='ios'?52:14, left:14, right:14,
+          backgroundColor:'#1E6B3A', borderRadius:16, padding:14,
+          flexDirection:'row', alignItems:'center', zIndex:1000,
+          shadowColor:'#000', shadowOffset:{width:0,height:4}, shadowOpacity:0.25, shadowRadius:10, elevation:10,
+        }}>
+          <Text style={{fontSize:22,marginRight:10}}>{activeNotif.status === 'fixed' ? '✅' : '🔧'}</Text>
+          <View style={{flex:1}}>
+            <Text style={{color:'#FFF',fontWeight:'700',fontSize:13}}>{activeNotif.title || 'Update'}</Text>
+            <Text style={{color:'rgba(255,255,255,0.92)',fontSize:11,marginTop:2}} numberOfLines={2}>{activeNotif.body || ''}</Text>
+            {activeNotif.status === 'fixed' && (
+              <TouchableOpacity
+                onPress={async () => {
+                  try { await firestore().collection('user_notifications').doc(phone).collection('items').doc(activeNotif.id).update({ read: true }); } catch(_) {}
+                  setActiveNotif(null);
+                  try { await Updates.reloadAsync(); } catch(_) {}
+                }}
+                style={{marginTop:8,backgroundColor:'#FFF',paddingHorizontal:12,paddingVertical:6,borderRadius:10,alignSelf:'flex-start'}}>
+                <Text style={{color:'#1E6B3A',fontWeight:'800',fontSize:11}}>🔄 Apply Update</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+          <TouchableOpacity
+            onPress={async () => {
+              try { await firestore().collection('user_notifications').doc(phone).collection('items').doc(activeNotif.id).update({ read: true }); } catch(_) {}
+              setActiveNotif(null);
+            }}
+            style={{padding:8,marginLeft:4}}>
+            <Text style={{color:'#FFF',fontSize:18,fontWeight:'600'}}>×</Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
       {/* UNIFIED Account Management modal — one native Modal, content switches by mode.
           Prevents the iOS modal-stacking handoff bug that caused "tap → app stuck". */}
