@@ -662,7 +662,24 @@ const SERVICES = [
   },
 ];
 
-const AREAS=['Madhurawada','Rushikonda','MVP Colony','Dwaraka Nagar','Kommadi','Seethammadhara','Gajuwaka','Pendurthi','Waltair','Siripuram'];
+// ── Service Areas ──
+// SERVED_AREAS: where VEGA workers operate today (booking accepted)
+// COMING_SOON_AREAS: shown in picker but blocked — user can tap "Notify me"
+// to log demand into Firestore (area_requests collection) so we know where to expand.
+const SERVED_AREAS = ['Madhurawada', 'Yendada', 'PM Palem'];
+const COMING_SOON_AREAS = ['Rushikonda', 'MVP Colony', 'Dwaraka Nagar', 'Kommadi', 'Seethammadhara', 'Gajuwaka', 'Pendurthi', 'Waltair', 'Siripuram'];
+const AREAS = [...SERVED_AREAS, ...COMING_SOON_AREAS];  // backwards-compat for code that iterates all areas
+
+const logAreaRequest = async (phone, area) => {
+  try {
+    await firestore().collection('area_requests').add({
+      phone: phone || 'anonymous',
+      area,
+      requestedAt: firestore.FieldValue.serverTimestamp(),
+    });
+    return true;
+  } catch (e) { console.log('logAreaRequest:', e.message); return false; }
+};
 
 // ── INDIVIDUAL TASK CARDS (Pronto-style, tap + to add multiple) ──
 const TASKS = [
@@ -1766,6 +1783,23 @@ export default function App() {
     if (cart.length === 0) { Alert.alert('Cart Empty', 'Please add a service first'); return; }
     if (!flat || flat.trim().length === 0) { Alert.alert('Address Required', 'Please enter your flat / house number'); return; }
     if (!selArea) { Alert.alert('Area Required', 'Please pick your service area'); return; }
+    // Block bookings from areas we don't serve yet — before payment, not after
+    if (!SERVED_AREAS.includes(selArea)) {
+      Alert.alert(
+        `Coming soon to ${selArea}!`,
+        `VEGA currently serves Madhurawada, Yendada & PM Palem. We're expanding — would you like a notification when we open in ${selArea}?`,
+        [
+          { text: 'Pick another area', style: 'cancel' },
+          { text: '🔔 Notify me', onPress: async () => {
+            const ok = await logAreaRequest(phone, selArea);
+            Alert.alert(ok ? 'Thanks!' : 'Got it', ok
+              ? `We'll text you when VEGA opens in ${selArea}.`
+              : `We've noted your interest in ${selArea}.`);
+          }},
+        ]
+      );
+      return;
+    }
     if (bookMode === 'scheduled' && (!selTime || selDatesMulti.length === 0)) {
       Alert.alert('Schedule Required', 'Please pick at least one date and a time'); return;
     }
@@ -1829,6 +1863,23 @@ export default function App() {
     // FIX (audit): block bookings with empty address — was silently submitting before
     if(!flat || flat.trim().length===0){Alert.alert('Address Required','Please enter your flat / house number');return;}
     if(!selArea){Alert.alert('Area Required','Please pick your service area');return;}
+    // Defense-in-depth: block bookings from areas where we don't operate yet
+    if(!SERVED_AREAS.includes(selArea)){
+      Alert.alert(
+        `Coming soon to ${selArea}!`,
+        `VEGA currently serves Madhurawada, Yendada & PM Palem. We're expanding — would you like a notification when we open in ${selArea}?`,
+        [
+          { text: 'Pick another area', style: 'cancel' },
+          { text: '🔔 Notify me', onPress: async () => {
+            const ok = await logAreaRequest(phone, selArea);
+            Alert.alert(ok ? 'Thanks!' : 'Got it', ok
+              ? `We'll text you when VEGA opens in ${selArea}.`
+              : `We've noted your interest in ${selArea}.`);
+          }},
+        ]
+      );
+      return;
+    }
     setPlacing(true);
     // SYNC FIX: No random fake professional. assignedWorkerName/professional
     // stay null until Hub Manager or worker self-accept assigns. UI shows
@@ -2819,12 +2870,52 @@ export default function App() {
                 <TouchableOpacity onPress={()=>setShowArea(false)} style={{width:30,height:30,borderRadius:15,backgroundColor:C.light,alignItems:'center',justifyContent:'center'}}><Text style={{fontSize:14,color:C.muted}}>✕</Text></TouchableOpacity>
               </View>
               <ScrollView>
-                {AREAS.map((a,i)=>(
-                  <TouchableOpacity key={i} style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center',padding:16,borderBottomWidth:0.5,borderBottomColor:C.border2,backgroundColor:selArea===a?C.orangeBg:C.white}} onPress={()=>{setSelArea(a);setShowArea(false);}}>
-                    <Text style={{fontSize:15,color:selArea===a?C.orange:C.text,fontWeight:selArea===a?'700':'400'}}>📍 {a}, Visakhapatnam</Text>
+                {/* Currently served areas — bookable */}
+                <View style={{paddingHorizontal:16,paddingTop:12,paddingBottom:6}}>
+                  <Text style={{fontSize:11,fontWeight:'700',color:'#1E6B3A',letterSpacing:0.5}}>✅ AVAILABLE NOW</Text>
+                </View>
+                {SERVED_AREAS.map((a,i)=>(
+                  <TouchableOpacity key={`s_${i}`}
+                    style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center',padding:16,borderBottomWidth:0.5,borderBottomColor:C.border2,backgroundColor:selArea===a?C.orangeBg:C.white}}
+                    onPress={()=>{setSelArea(a);setShowArea(false);}}>
+                    <Text style={{fontSize:15,color:selArea===a?C.orange:C.text,fontWeight:selArea===a?'700':'500'}}>📍 {a}, Visakhapatnam</Text>
                     {selArea===a&&<Text style={{color:C.orange,fontWeight:'700'}}>✓</Text>}
                   </TouchableOpacity>
                 ))}
+
+                {/* Coming-soon areas — show but block with "Notify me" prompt */}
+                <View style={{paddingHorizontal:16,paddingTop:18,paddingBottom:6}}>
+                  <Text style={{fontSize:11,fontWeight:'700',color:'#8A6858',letterSpacing:0.5}}>🚀 COMING SOON</Text>
+                  <Text style={{fontSize:10,color:C.muted,marginTop:2}}>We'll notify you when VEGA launches in your area</Text>
+                </View>
+                {COMING_SOON_AREAS.map((a,i)=>(
+                  <TouchableOpacity key={`cs_${i}`}
+                    style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center',padding:16,borderBottomWidth:0.5,borderBottomColor:C.border2,backgroundColor:C.white,opacity:0.65}}
+                    onPress={()=>{
+                      Alert.alert(
+                        `Coming soon to ${a}!`,
+                        `VEGA currently serves Madhurawada, Yendada & PM Palem. We're expanding fast — would you like us to notify you when we launch in ${a}?`,
+                        [
+                          { text: 'Pick another area', style: 'cancel' },
+                          { text: '🔔 Notify me', onPress: async () => {
+                            const ok = await logAreaRequest(phone, a);
+                            Alert.alert(
+                              ok ? 'Thanks!' : 'Got it',
+                              ok
+                                ? `We'll text you on ${phone ? '+91 '+phone : 'your registered number'} as soon as VEGA opens in ${a}.`
+                                : `We've noted your interest in ${a}.`
+                            );
+                          }},
+                        ]
+                      );
+                    }}>
+                    <Text style={{fontSize:14,color:C.muted,fontWeight:'500'}}>📍 {a}, Visakhapatnam</Text>
+                    <View style={{backgroundColor:'#F0E8DC',paddingHorizontal:8,paddingVertical:3,borderRadius:8}}>
+                      <Text style={{fontSize:9,fontWeight:'700',color:'#8A6858'}}>SOON</Text>
+                    </View>
+                  </TouchableOpacity>
+                ))}
+                <View style={{height:24}}/>
               </ScrollView>
             </View>
           </View>
