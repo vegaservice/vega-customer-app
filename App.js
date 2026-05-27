@@ -79,106 +79,64 @@ const logWalletTransaction = async (phone, amount, reason, type = 'credit') => {
 };
 
 // ── Apple Guideline 5.1.1(v): Account Deletion (REQUIRED for App Store) ──
-// Deletes user's Firestore data + Firebase Auth account.
-// Past completed bookings are anonymized (kept for tax/audit, customer info removed).
-// In-progress / pending bookings are cancelled.
+// Calls server-side Cloud Function `deleteCustomerAccount` which uses
+// Firebase Admin SDK to bypass Firestore rules AND the 'requires-recent-login'
+// limitation. This is the AUTHORITATIVE deletion path — server is the source
+// of truth, no silent failures.
+//
+// Server URL: https://asia-south1-vega-home-service.cloudfunctions.net/deleteCustomerAccount
+//
+// Flow:
+//   1. Get fresh ID token from Firebase Auth
+//   2. POST { idToken, phone } to the Cloud Function
+//   3. Server verifies token, deletes everything, returns summary
+//   4. Client signs out regardless of result
+const DELETE_ACCOUNT_URL = 'https://asia-south1-vega-home-service.cloudfunctions.net/deleteCustomerAccount';
+
 const deleteUserAccount = async (phone) => {
   if (!phone) return { ok: false, error: 'No phone' };
-  const result = { ok: false, deletedFields: [], anonymizedBookings: 0, cancelledBookings: 0 };
   try {
-    // 1. Cancel any pending / in-progress bookings tied to this customer
-    try {
-      const activeSnap = await firestore().collection('bookings')
-        .where('customerPhone', '==', phone)
-        .where('status', 'in', ['pending', 'confirmed', 'assigned', 'on_the_way', 'in_progress'])
-        .get();
-      const cancelBatch = firestore().batch();
-      activeSnap.docs.forEach(d => {
-        cancelBatch.update(d.ref, {
-          status: 'cancelled',
-          cancelledAt: firestore.FieldValue.serverTimestamp(),
-          cancelReason: 'account_deleted',
-        });
-      });
-      if (activeSnap.size > 0) await cancelBatch.commit();
-      result.cancelledBookings = activeSnap.size;
-    } catch (e) { console.log('cancel active bookings:', e.message); }
+    const fUser = auth().currentUser;
+    if (!fUser) return { ok: false, error: 'Not logged in' };
 
-    // 2. Anonymize past completed bookings (kept for tax/audit, but PII stripped)
-    try {
-      const pastSnap = await firestore().collection('bookings')
-        .where('customerPhone', '==', phone)
-        .where('status', 'in', ['completed', 'cancelled'])
-        .get();
-      const anonBatch = firestore().batch();
-      pastSnap.docs.forEach(d => {
-        anonBatch.update(d.ref, {
-          customerName: '[deleted]',
-          customerPhone: '[deleted]',
-          userName: '[deleted]',
-          userPhone: '[deleted]',
-          address: { city: 'Visakhapatnam' },
-          addressFull: '[deleted]',
-          accountDeletedAt: firestore.FieldValue.serverTimestamp(),
-        });
-      });
-      if (pastSnap.size > 0) await anonBatch.commit();
-      result.anonymizedBookings = pastSnap.size;
-    } catch (e) { console.log('anonymize past bookings:', e.message); }
+    // Get a fresh ID token (force refresh to avoid stale token issues)
+    const idToken = await fUser.getIdToken(true);
 
-    // 3. Delete saved addresses subcollection
-    try {
-      const addrSnap = await firestore().collection('users').doc(phone).collection('addresses').get();
-      const addrBatch = firestore().batch();
-      addrSnap.docs.forEach(d => addrBatch.delete(d.ref));
-      if (addrSnap.size > 0) await addrBatch.commit();
-      result.deletedFields.push(`${addrSnap.size} addresses`);
-    } catch (e) { console.log('delete addresses:', e.message); }
+    const response = await fetch(DELETE_ACCOUNT_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ idToken, phone }),
+    });
 
-    // 4. Delete user's booking mirror subcollection
-    try {
-      const userBookSnap = await firestore().collection('users').doc(phone).collection('bookings').get();
-      const ubBatch = firestore().batch();
-      userBookSnap.docs.forEach(d => ubBatch.delete(d.ref));
-      if (userBookSnap.size > 0) await ubBatch.commit();
-      result.deletedFields.push(`${userBookSnap.size} booking mirrors`);
-    } catch (e) { console.log('delete user bookings:', e.message); }
+    const data = await response.json().catch(() => ({}));
 
-    // 5. Delete wallet_transactions for this phone
-    try {
-      const walletSnap = await firestore().collection('wallet_transactions')
-        .where('phone', '==', phone).get();
-      const walletBatch = firestore().batch();
-      walletSnap.docs.forEach(d => walletBatch.delete(d.ref));
-      if (walletSnap.size > 0) await walletBatch.commit();
-      result.deletedFields.push(`${walletSnap.size} wallet transactions`);
-    } catch (e) { console.log('delete wallet txns:', e.message); }
+    // Always sign out — even if the server call failed, the user wants to leave
+    try { await auth().signOut(); } catch (_) {}
 
-    // 6. Delete user document itself
-    try {
-      await firestore().collection('users').doc(phone).delete();
-      result.deletedFields.push('user profile');
-    } catch (e) { console.log('delete user doc:', e.message); }
-
-    // 7. Delete Firebase Auth user (requires recent login — may need re-auth)
-    try {
-      const fUser = auth().currentUser;
-      if (fUser) {
-        await fUser.delete();
-        result.deletedFields.push('Firebase Auth account');
-      }
-    } catch (e) {
-      if (e.code === 'auth/requires-recent-login') {
-        // Sign out anyway — data is deleted, auth user will be cleaned up next session
-        await auth().signOut();
-        return { ...result, ok: true, requiresRecentLogin: true };
-      }
-      console.log('delete auth user:', e.code, e.message);
+    if (!response.ok || !data.ok) {
+      return {
+        ok: false,
+        error: data.error || `Server returned ${response.status}. Please try again or contact hello@vegavizag.in.`,
+      };
     }
 
-    return { ...result, ok: true };
+    const s = data.summary || {};
+    return {
+      ok: true,
+      cancelledBookings: s.cancelledBookings || 0,
+      anonymizedBookings: s.anonymizedBookings || 0,
+      deletedAddresses: s.deletedAddresses || 0,
+      deletedBookingMirrors: s.deletedBookingMirrors || 0,
+      deletedWalletTxns: s.deletedWalletTxns || 0,
+      deletedUserDoc: s.deletedUserDoc,
+      deletedAuthUser: s.deletedAuthUser,
+      serverErrors: s.errors || [],
+    };
   } catch (e) {
-    return { ok: false, error: e.message };
+    console.log('deleteUserAccount network error:', e.message);
+    // Even on network failure, sign out so user has a clean state
+    try { await auth().signOut(); } catch (_) {}
+    return { ok: false, error: `Network error: ${e.message}. Signed out for safety — please try delete again after logging back in.` };
   }
 };
 
@@ -3414,12 +3372,30 @@ export default function App() {
                       setPhone(''); setOtpVal(''); setConfirm(null);
                       setShowDeleteAccountModal(false); setDeleteConfirmText('');
                       setScreen('login');
-                      const summary = result.requiresRecentLogin
-                        ? 'Your data has been deleted. The login record will be fully removed within 24 hours.'
-                        : `Your account and all personal data have been permanently removed.\n\nCancelled bookings: ${result.cancelledBookings}\nAnonymized past records: ${result.anonymizedBookings}`;
-                      Alert.alert('✅ Account Deleted', summary);
+                      const lines = [
+                        'Your VEGA account and all personal data have been permanently removed.',
+                        '',
+                        `• Active bookings cancelled: ${result.cancelledBookings || 0}`,
+                        `• Past bookings anonymized: ${result.anonymizedBookings || 0}`,
+                        `• Addresses deleted: ${result.deletedAddresses || 0}`,
+                        `• Wallet history deleted: ${result.deletedWalletTxns || 0}`,
+                        `• Profile deleted: ${result.deletedUserDoc ? 'Yes' : 'No'}`,
+                        `• Login record deleted: ${result.deletedAuthUser ? 'Yes' : 'No'}`,
+                      ];
+                      if (result.serverErrors && result.serverErrors.length > 0) {
+                        lines.push('', 'Partial: ' + result.serverErrors.join('; '));
+                      }
+                      Alert.alert('✅ Account Deleted', lines.join('\n'));
                     } else {
-                      Alert.alert('Could not delete', `Error: ${result.error || 'unknown'}. Please try again or contact hello@vegavizag.in for help.`);
+                      // Sign out + return to login even on failure — fail-closed UX
+                      if (ordersUnsub) ordersUnsub();
+                      if (addrsUnsub) addrsUnsub();
+                      setOrdersUnsub(null); setAddrsUnsub(null);
+                      setSavedAddrs([]); setOrders([]); setUser(null);
+                      setPhone(''); setOtpVal(''); setConfirm(null);
+                      setShowDeleteAccountModal(false); setDeleteConfirmText('');
+                      setScreen('login');
+                      Alert.alert('Could not complete deletion', `${result.error || 'Unknown error'}\n\nYou've been signed out. Please try again or contact hello@vegavizag.in for help.`);
                     }
                   }}
                   style={{
