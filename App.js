@@ -43,7 +43,7 @@ import * as Updates from 'expo-updates';
 
 // OTA build label — bump this every release so user can verify which build is loaded.
 // Increment the number whenever you ship a new OTA so the user knows it landed.
-const OTA_BUILD_LABEL = 'v15 · 27-May · BugFix-Banner';
+const OTA_BUILD_LABEL = 'v16 · 29-May · Email-Phone-Fix';
 
 // ── Firestore Service Functions (inline — no separate file needed) ──
 const createOrUpdateUser = async (phone, data) => {
@@ -121,7 +121,7 @@ const deleteUserAccount = async (phone) => {
     if (!response.ok || !data.ok) {
       return {
         ok: false,
-        error: data.error || `Server returned ${response.status}. Please try again or contact hello@vegavizag.in.`,
+        error: data.error || `Server returned ${response.status}. Please try again or contact connect@vegaservice.in.`,
       };
     }
 
@@ -2318,7 +2318,7 @@ export default function App() {
           } catch (_) {}
           Alert.alert(
             '⚠️ Visits Partially Saved',
-            `Your first visit is booked, but the ${childDates.length} follow-up visits could not be saved automatically. Our team has been notified and will create them within 1 hour. Call +91-891-VEGA-999 if urgent. Order: ${result.orderId}`,
+            `Your first visit is booked, but the ${childDates.length} follow-up visits could not be saved automatically. Our team has been notified and will create them within 1 hour. Call +91 9441270570 if urgent. Order: ${result.orderId}`,
           );
         }
       }
@@ -4730,7 +4730,7 @@ export default function App() {
             ['💳','Payment Methods',()=>Alert.alert('Coming Soon')],
             ['🔔','Notifications',()=>Alert.alert('Notifications 🔔','VEGA50 expires today!')],
             ['⭐','Rate VEGA App',()=>Alert.alert('Thank You! 🙏')],
-            ['🆘','Help & Support',()=>Alert.alert('VEGA Support','📞 +91-891-VEGA-999\n📧 hello@vegavizag.in\n⏰ 8AM–10PM')],
+            ['🆘','Help & Support',()=>Alert.alert('VEGA Support','📞 +91 9441270570\n📧 connect@vegaservice.in\n⏰ 8AM–10PM')],
           ].map(([ic,lb,ac],i)=>(
             <TouchableOpacity key={i} style={{flexDirection:'row',alignItems:'center',backgroundColor:C.card,borderRadius:18,padding:14,marginBottom:8,borderWidth:0.5,borderColor:C.border2,...SHADOW.card}} onPress={ac}>
               <View style={{width:42,height:42,borderRadius:13,backgroundColor:C.orangeBg,alignItems:'center',justifyContent:'center',marginRight:14,borderWidth:0.5,borderColor:C.orangeBd}}><Text style={{fontSize:20}}>{ic}</Text></View>
@@ -5138,7 +5138,7 @@ export default function App() {
                       }
                       Alert.alert('✅ Account Deleted', lines.join('\n'));
                     } else {
-                      Alert.alert('Could not complete deletion', `${result.error || 'Unknown error'}\n\nYou have been signed out. Please try again or contact hello@vegavizag.in for help.`);
+                      Alert.alert('Could not complete deletion', `${result.error || 'Unknown error'}\n\nYou have been signed out. Please try again or contact connect@vegaservice.in for help.`);
                     }
                   }}
                   style={{
