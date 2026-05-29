@@ -33,7 +33,7 @@
         "backgroundColor": "#E8520A"
       },
       "package": "com.vegavizag.app",
-      "versionCode": 5,
+      "versionCode": 6,
       "googleServicesFile": "./google-services.json",
       "permissions": [
         "CAMERA",
