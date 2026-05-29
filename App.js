@@ -43,7 +43,7 @@ import * as Updates from 'expo-updates';
 
 // OTA build label — bump this every release so user can verify which build is loaded.
 // Increment the number whenever you ship a new OTA so the user knows it landed.
-const OTA_BUILD_LABEL = 'v16 · 29-May · Email-Phone-Fix';
+const OTA_BUILD_LABEL = 'v17 · 29-May · AutoCrash-Reporter';
 
 // ── Firestore Service Functions (inline — no separate file needed) ──
 const createOrUpdateUser = async (phone, data) => {
@@ -1033,6 +1033,58 @@ try {
 // Sends to: Firestore `bug_reports` collection
 // View at: Firebase Console → Firestore → bug_reports
 // ════════════════════════════════════════════════════════════════
+// ────────────────────────────────────────────────────────────────────
+// 🚨 GLOBAL ERROR HANDLER — Auto-captures uncaught crashes/auth failures
+// Writes to bug_reports collection so we KNOW about customer issues
+// without depending on customers tapping the 🐛 button.
+// Fires for: unhandled promise rejections, React errors, auth failures.
+// ────────────────────────────────────────────────────────────────────
+const __autoErrorCache = new Set();   // dedup repeated errors per session
+let __autoErrorInstalled = false;
+const installGlobalErrorHandler = (extraContext = {}) => {
+  if (__autoErrorInstalled) return;
+  __autoErrorInstalled = true;
+
+  const logCrash = async (kind, message, stack) => {
+    try {
+      const dedupKey = (kind + ':' + (message || '').slice(0, 100));
+      if (__autoErrorCache.has(dedupKey)) return;
+      __autoErrorCache.add(dedupKey);
+      await firestore().collection('bug_reports').add({
+        app: 'customer',
+        autoReported: true,
+        kind,
+        description: `[AUTO] ${kind}: ${message || 'unknown'}`,
+        stack: (stack || '').slice(0, 4000),
+        severity: 'high',
+        reportedAt: firestore.FieldValue.serverTimestamp(),
+        status: 'open',
+        otaBuildLabel: typeof OTA_BUILD_LABEL !== 'undefined' ? OTA_BUILD_LABEL : 'unknown',
+        device: { os: Platform.OS, version: Platform.Version },
+        ...extraContext,
+      });
+    } catch (_) { /* swallow — never let crash reporting itself crash */ }
+  };
+
+  // 1. Unhandled promise rejections
+  const origUnhandledRejection = global.HermesInternal?.enablePromiseRejectionTracker
+    ? global.HermesInternal.enablePromiseRejectionTracker({
+        allRejections: true,
+        onUnhandled: (id, err) => logCrash('unhandled_promise', err?.message || String(err), err?.stack),
+      })
+    : null;
+
+  // 2. React Native ErrorUtils
+  const ErrorUtils = global.ErrorUtils;
+  if (ErrorUtils && typeof ErrorUtils.setGlobalHandler === 'function') {
+    const prevHandler = ErrorUtils.getGlobalHandler ? ErrorUtils.getGlobalHandler() : null;
+    ErrorUtils.setGlobalHandler((err, isFatal) => {
+      logCrash(isFatal ? 'fatal_js_error' : 'js_error', err?.message || String(err), err?.stack);
+      if (prevHandler) try { prevHandler(err, isFatal); } catch (_) {}
+    });
+  }
+};
+
 const submitBugReport = async (context, description, severity, screenshotDataUrl = null) => {
   try {
     const doc = {
@@ -1488,6 +1540,8 @@ export default function App() {
   // ~1-2s splash delay but guarantees users always see the latest bundle.
   useEffect(() => {
     checkAndApplyOTA(true).catch(() => {});
+    // Install global crash reporter — auto-fills bug_reports if anything goes wrong
+    installGlobalErrorHandler({ userPhone: phone || null });
   }, []);
 
   useEffect(()=>{
