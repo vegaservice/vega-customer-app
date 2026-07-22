@@ -339,7 +339,7 @@ const DEMO_MODE = false;  // 🚀 PRODUCTION — Firebase active
 // These MUST also be added to Firebase Console > Auth > Phone > "Phone numbers for testing"
 // with OTP 123456, otherwise real SMS is attempted (which triggers the reCAPTCHA page on iOS
 // when APNs is not fully configured).
-const TEST_PHONES = ['9999999999','7777777701','9999999998','9133222344','9441270570','7207719922','1111111111'];
+const TEST_PHONES = ['9133222344','9441270570','7207719922'];  // 22-Jul: all fake logins removed, real operator numbers only
 
 // ── FIX 2: GOOGLE MAPS STATIC API
 const MAPS_API_KEY = 'AIzaSyDIQw9tYW5x2NMHZWEIsMlsYkwdxYUbilU';
