@@ -49,7 +49,7 @@ const OTA_BUILD_LABEL = 'v25 · 04-Jun · Offers tab (Snabbit-style eligibility)
 // Minimum cart total (in ₹) required before a booking can be confirmed.
 // Below this, the user gets prompted to add more items. Prevents the
 // "no minimum charge" issue reported by testers on 03-Jun-2026.
-const MIN_BOOKING_AMOUNT = 99;  // ₹99 so the MOST BOOKED ₹99 Home package is bookable on its own (FIND-1)
+const MIN_BOOKING_AMOUNT = 99;  // cart minimum ₹99 — small add-ons (₹39-49) must be combined (FIND-1)
 
 // ── Firestore Service Functions (inline — no separate file needed) ──
 const createOrUpdateUser = async (phone, data) => {
@@ -547,15 +547,13 @@ const PROMOS = {
 const SERVICES = [
   { id:'home',    name:'Home\nCleaning',  shortName:'Home Cleaning',   icon:'🏠', gradient:['#FF6B35','#C8541A'], shadow:'rgba(200,84,26,0.4)',  iconBg:'#FF8B55', tagline:'Sweeping, mopping & full home clean',       workerLabel:'Cleaners',    badge:'Most Booked',
     durations:[
-      { id:'fm_ut', label:'Floor + Mop + Utensils', price:99, mrp:250, popular:true, badge:'MOST BOOKED',
+      { id:'fm_ut', label:'Floor + Mop + Utensils', price:149, mrp:250, popular:true, badge:'MOST BOOKED',
         tasks:['Sweeping all rooms','Wet mopping all floors','Cleaning all utensils','Kitchen sink quick wipe'],
         note:'Daily favourite — covers floors + utensils in one visit' },
       { id:'fm',    label:'Floor + Mop',              price:89, mrp:149, popular:false,
         tasks:['Sweeping all rooms','Wet mopping all floors','Surface dust on tables'],
         note:'Quick daily floor refresh' },
-      { id:'ut',    label:'Utensils Only',            price:59, mrp:99,  popular:false,
-        tasks:['Wash all utensils in sink','Wipe stove top after','Clean sink area'],
-        note:'Just dishes — fast turnaround' },
+      // 'ut' Utensils Only removed 22-Jul per Mahesh — standalone utensils service discontinued
       { id:'kb',    label:'Basic Kitchen',            price:39, mrp:59,  popular:false,
         tasks:['Kitchen counter scrub','Sink cleaning & descaling','Stove top wipe'],
         note:'Quick kitchen daily clean' },
@@ -565,27 +563,26 @@ const SERVICES = [
       { id:'st',    label:'Stove Cleaning',           price:39, mrp:59,  popular:false,
         tasks:['Stove top deep scrub','Burner clean','Drip tray wash'],
         note:'Remove built-up grease from stove' },
-      { id:'fg',    label:'Refrigerator Cleaning',    price:59, mrp:99,  popular:false,
+      { id:'fg',    label:'Refrigerator Cleaning',    price:199, mrp:299,  popular:false,
         tasks:['Interior shelf wipe','Door seal cleaning','Exterior polish','Vegetable tray wash'],
         note:'Interior + exterior fridge refresh' },
     ],
     addons:[
-      {id:'fan',       name:'Fan Cleaning',             price:25,  icon:'🌀', desc:'All ceiling fans cleaned'},
+      {id:'fan',       name:'Fan Cleaning',             price:49,  icon:'🌀', desc:'All ceiling fans cleaned'},
       {id:'balcony',   name:'Balcony Cleaning',          price:25,  icon:'🌿', desc:'Sweep + mop balcony'},
-      {id:'iron_extra',name:'Iron Extra Clothes',        price:25,  icon:'👔', desc:'Iron up to 10 extra pairs'},
+      // 'iron_extra' + 'pack' removed 22-Jul per Mahesh — re-add later if needed
       {id:'dry_hang',  name:'Dry / Hang Clothes',        price:25,  icon:'🧺', desc:'Dry or hang washed clothes'},
       {id:'load_wash', name:'Load Washing Machine',      price:39,  icon:'🌀', desc:'Load + start washing machine'},
-      {id:'fridge',    name:'Fridge Cleaning',           price:99,  icon:'❄️', desc:'Interior + exterior clean'},
+      {id:'fridge',    name:'Fridge Cleaning',           price:199, icon:'❄️', desc:'Interior + exterior clean'},
       {id:'washing_m', name:'Washing Machine Clean',     price:99,  icon:'🫧', desc:'Drum + exterior cleaning'},
-      {id:'pack',      name:'Packing + Unpacking',       price:39,  icon:'📦', desc:'Pack or unpack belongings'},
-      {id:'party',     name:'After Party Express Clean', price:199, icon:'🎉', desc:'Quick restore after party'},
+      {id:'party',     name:'After Party Express Clean', price:999, icon:'🎉', desc:'Quick restore after party'},
     ],
-    covered:['Mopping & sweeping all rooms','Kitchen counter & utensil cleaning','Surface dusting — tables, shelves','Clothes folding and ironing (included in 2hr & 3hr)','Bathroom exterior wipe (not deep clean)'],
+    covered:['Mopping & sweeping all rooms','Kitchen counter & utensil cleaning','Surface dusting — tables, shelves','Bathroom exterior wipe (not deep clean)'],
     notCovered:['Bathroom deep cleaning — book Bathroom Cleaning separately','Outside window glass cleaning','Sofa or carpet cleaning — book separately','Moving heavy furniture','Pest control or repairs','Cooking or food preparation'],
   },
   { id:'bathroom', name:'Bathroom\nCleaning', shortName:'Bathroom Cleaning', icon:'🚿', gradient:['#2C88D9','#183880'], shadow:'rgba(24,56,128,0.4)', iconBg:'#4A98E8', tagline:'Deep scrub — tiles, commode, mirror & taps', workerLabel:'Cleaners', badge:'High Demand',
     durations:[
-      { id:'b1', hrs:1, label:'1 Bathroom', price:149, mrp:299, popular:true,
+      { id:'b1', hrs:1, label:'1 Bathroom', price:300, mrp:599, popular:true,
         tasks:[
           'Toilet scrubbing and disinfection with Harpic',
           'Wash basin cleaning and polishing',
@@ -606,7 +603,7 @@ const SERVICES = [
         ],
         note:'1 bathroom — complete deep clean',
       },
-      { id:'b2', hrs:2, label:'2 Bathrooms', price:249, mrp:499, popular:false,
+      { id:'b2', hrs:2, label:'2 Bathrooms', price:499, mrp:899, popular:false,
         tasks:[
           'Both toilets scrubbed and disinfected with Harpic',
           'Both wash basins cleaned and polished',
@@ -627,7 +624,7 @@ const SERVICES = [
         ],
         note:'2 bathrooms — every item done in both',
       },
-      { id:'b3', hrs:3, label:'3+ Bathrooms', price:349, mrp:699, popular:false,
+      { id:'b3', hrs:3, label:'3+ Bathrooms', price:699, mrp:1199, popular:false,
         tasks:[
           'All 3+ toilets scrubbed and disinfected with Harpic',
           'All wash basins cleaned and polished',
@@ -655,9 +652,9 @@ const SERVICES = [
   },
   { id:'kitchen', name:'Kitchen\nCleaning',shortName:'Kitchen', icon:'🍳',gradient:['#E87030','#A84A10'],shadow:'rgba(168,74,16,0.4)',iconBg:'#E88040',tagline:'Stove, chimney, counters & sink',workerLabel:'Cleaners',badge:null,
     durations:[
-      {id:'k1',hrs:1,label:'Basic',   price:99, mrp:199,popular:false,tasks:['Kitchen counter scrub','Sink cleaning & descaling','Stove top & burners cleaned','Cabinet exterior wipe'],note:'Quick clean — daily maintenance'},
-      {id:'k2',hrs:2,label:'Standard',price:199,mrp:399,popular:true, tasks:['Kitchen counter scrub','Sink cleaning & descaling','Stove top & burners cleaned','Cabinet exterior wipe','Chimney exterior cleaning','Tiles wipe-down'],note:'Best for weekly cleaning'},
-      {id:'k3',hrs:3,label:'Deep',    price:299,mrp:599,popular:false,tasks:['All Standard tasks','Chimney filter/mesh deep clean','Inside cabinet cleaning (empty, wipe, refill)','Gas stove deep degrease','Floor degreasing & mop'],note:'Monthly deep clean — remove built-up grease'},
+      {id:'k1',hrs:1,label:'Basic',   price:250,mrp:499,popular:false,tasks:['Kitchen counter scrub','Sink cleaning & descaling','Stove top & burners cleaned','Cabinet exterior wipe'],note:'Quick clean — daily maintenance'},
+      {id:'k2',hrs:2,label:'Standard',price:450,mrp:899,popular:true, tasks:['Kitchen counter scrub','Sink cleaning & descaling','Stove top & burners cleaned','Cabinet exterior wipe','Chimney exterior cleaning','Tiles wipe-down'],note:'Best for weekly cleaning'},
+      {id:'k3',hrs:3,label:'Deep',    price:750,mrp:1499,popular:false,tasks:['All Standard tasks','Chimney filter/mesh deep clean','Inside cabinet cleaning (empty, wipe, refill)','Gas stove deep degrease','Floor degreasing & mop'],note:'Monthly deep clean — remove built-up grease'},
     ],
     addons:[
       {id:'inside_cab',name:'Inside Cabinets',  price:49, icon:'🗄️',desc:'Empty + deep wipe + replace'},
@@ -670,9 +667,9 @@ const SERVICES = [
   { id:'car', name:'Car\nCleaning', shortName:'Car Cleaning', icon:'🚗', gradient:['#18A888','#0E5848'], shadow:'rgba(14,88,72,0.4)', iconBg:'#28C8A8', tagline:'Dry waterless cleaning — no water spraying', workerLabel:'Detailers', badge:'Eco Friendly',
     // carType: 'hatchback' | 'sedan' | 'suv'  — selected dynamically in step1
     carPricing:{
-      single:   {hatchback:59,  sedan:59,  suv:59},
-      weekly:   {hatchback:299, sedan:399, suv:399},
-      monthly:  {hatchback:499, sedan:599, suv:599},
+      single:   {hatchback:100, sedan:100, suv:100},
+      // weekly package removed 22-Jul per Mahesh
+      monthly:  {hatchback:700, sedan:700, suv:800},
     },
     carExamples:{
       hatchback:'Swift, Alto, i10, WagonR, Baleno',
@@ -680,17 +677,13 @@ const SERVICES = [
       suv:      'Creta, Seltos, Brezza, XUV300',
     },
     durations:[
-      { id:'c1', label:'Single Clean (Outer Body)', price:59, mrp:99, popular:false,
+      { id:'c1', label:'Single Clean (Outer Body)', price:100, mrp:199, popular:false,
         duration:'20–30 mins',
         tasks:['Full outer body cleaning (doors, bonnet, boot)','All headlights & tail lights cleaned and shiny','All mirrors cleaned (streak-free)','Tyre surface wiped and cleaned','Window glass cleaned (outer side)','Number plate cleaned'],
         note:'Exterior only — one-time wash',
       },
-      { id:'c2', label:'Weekly Cleaning (Outer × 4/month)', price:299, mrp:499, popular:false,
-        duration:'20–30 mins per visit',
-        tasks:['Everything in Single Clean × 4 times per month','Same professional each visit','Same day & time every week (you choose once)','Automatic scheduling — no need to book each week'],
-        note:'Full month upfront — hassle-free weekly outer service',
-      },
-      { id:'c3', label:'Monthly Premium (Outer × 4 + Inner × 1)', price:499, mrp:799, popular:true,
+      // 'c2' Weekly Cleaning removed 22-Jul per Mahesh — Single + Monthly only
+      { id:'c3', label:'Monthly Premium (Outer × 4 + Inner × 1)', price:700, mrp:1199, popular:true,
         duration:'Outer 20–30 min · Inner 60 min (once a month)',
         tasks:['Outer body cleaning every week (4 visits/month)','1 inner cabin deep clean per month','Dashboard wiped & polished','All seats wiped','Door panels cleaned','Floor mats cleaned','Centre console wiped','Tyre cleaning every outer visit'],
         note:'⭐ MOST POPULAR — full month, complete premium care',
@@ -775,47 +768,26 @@ const logAreaRequest = async (phone, area) => {
 
 // ── INDIVIDUAL TASK CARDS (Pronto-style, tap + to add multiple) ──
 const TASKS = [
-  {id:'t_fan', name:'Fan Cleaning', price:25, mrp:49, icon:'🌀', color:'#4A98E8', desc:'Per ceiling fan cleaned', unit:'fan',
+  {id:'t_fan', name:'Fan Cleaning', price:49, mrp:99, icon:'🌀', color:'#4A98E8', desc:'Per ceiling fan cleaned', unit:'fan',
     includes:['Dust removal from fan blades','Wiping blade surfaces with damp cloth','Cleaning fan motor housing exterior','Wiping visible light fixtures attached','Basic polish for a clean finish'],
     excludes:['Electrical rewiring or motor repair','Dismantling fan for deep clean','Removing blades from shaft','Work on fans above 12 feet height','Replacing bulbs or capacitors']},
-  {id:'t_fridge', name:'Fridge Cleaning', price:149, mrp:249, icon:'❄️', color:'#4A98E8', desc:'Interior + exterior clean', unit:'fridge',
+  {id:'t_fridge', name:'Fridge Cleaning', price:199, mrp:349, icon:'❄️', color:'#4A98E8', desc:'Interior + exterior clean', unit:'fridge',
     includes:['Switching off fridge safely before work','Removing all food items aside carefully','Cleaning shelves, trays, drawers, door bins','Wiping inner walls and rubber door lining','Basic deodorising of fridge interior','Cleaning exterior front and side panels','Replacing food items neatly back'],
     excludes:['Moving or lifting the refrigerator','Cleaning back panel or condenser coils','Repair or servicing of the fridge','Deep freezer defrosting (takes hours)','Disposing garbage outside the home','Handling meat or raw seafood for hygiene']},
-  {id:'t_pack', name:'Packing or Unpacking', price:49, mrp:89, icon:'📦', color:'#1E6B3A', desc:'Organise clothes, kitchen & more', unit:'session',
-    includes:['Packing or unpacking clothes, shoes, linens','Packing or unpacking kitchen items and groceries','Folding and organising items before packing','Placing items into boxes, suitcases, cupboards','Labelling boxes (room-wise or item-wise)','Light dusting before placing items back','Basic organisation using existing storage'],
-    excludes:['Heavy lifting or moving of furniture','Carrying boxes up or down stairs','Handling jewellery, cash, documents, valuables','Packing fragile antiques or artwork','Furniture dismantling or assembly']},
+  // 't_pack' Packing or Unpacking removed 22-Jul per Mahesh
   {id:'t_kprep', name:'Kitchen Prep', price:49, mrp:89, icon:'🥘', color:'#E88040', desc:'Veggie chop, meat marinate, salad prep', unit:'session',
     includes:['Vegetable chopping and salad preparation','Meat marination as per your instructions','Serving food to family members','Basic mise-en-place (preparation before cooking)','Washing vegetables thoroughly before prep'],
     excludes:['Cooking full meals from scratch','Specialised cuisine preparation','Handling raw seafood or exotic meats','Baking or dessert preparation','Storing prepared food for long-term']},
   {id:'t_dust', name:'Dusting & Wiping', price:49, mrp:89, icon:'🧹', color:'#9860E0', desc:'Shelves, furniture, tables, decor', unit:'session',
     includes:['Dusting shelves and furniture surfaces','Wiping counters, tables, and decor items','Cleaning window sills and grills (reachable)','Removing accessible cobwebs','Wiping appliance exteriors'],
     excludes:['Dusting ceilings or very high areas','Using unstable stools or ladders','Handling chandeliers or fragile items','Cleaning exterior grills or outside windows','Stain removal or restoration work']},
-  {id:'t_iron', name:'Ironing & Folding', price:25, mrp:49, icon:'👔', color:'#9860E0', desc:'Per 10 clothes ironed & folded', unit:'set of 10',
-    includes:['Sorting clothes for ironing','Ironing regular daily wear clothes','Folding clothes neatly after ironing','Arranging clothes in stacks','Basic tidying of ironing area after work'],
-    excludes:['Ironing delicate silks or expensive fabrics','Handling biohazard-stained clothes','Cleaning the washing machine or iron','Advanced stain treatment','Hand washing bed sheets or footwear']},
-  {id:'t_window', name:'Window Cleaning', price:25, mrp:49, icon:'🪟', color:'#2C88D9', desc:'Per window — streak-free shine', unit:'window',
+  // 't_iron' Ironing & Folding removed 22-Jul per Mahesh — re-add later
+  {id:'t_window', name:'Window Cleaning', price:69, mrp:129, icon:'🪟', color:'#2C88D9', desc:'Per window — streak-free shine', unit:'window',
     includes:['Inside glass wipe — streak-free finish','Window sill cleaning','Grill dust removal (reachable)','Window frame wiping','Final polish with dry cloth'],
     excludes:['Outside glass of high-floor windows','Work requiring ladders or safety harness','Broken glass replacement or repair','Cleaning curtains or blinds','Exterior grill painting or restoration']},
-  {id:'t_utensils', name:'Utensils Cleaning', price:49, mrp:99, icon:'🍽️', color:'#E88040', desc:'All utensils cleaned & dried', unit:'session',
-    includes:[
-      'Scrubbing and cleaning all utensils (plates, cups, bowls, glasses)',
-      'Scrubbing pots, pans, pressure cookers, kadai',
-      'Cleaning the kitchen sink thoroughly',
-      'Cleaning all burners on the stove',
-      'Wiping the stove top surface',
-      'Leaving the sink area clean and completely dry',
-      'Cleaning any dishes left soaking',
-    ],
-    excludes:[
-      'Cooking or food preparation',
-      'Buying cleaning supplies or soap',
-      'Washing clothes or other items',
-      'Moving heavy appliances or furniture',
-      'Appliance repair or servicing',
-      'Items outside the kitchen sink area',
-    ]},
+  // 't_utensils' Utensils Cleaning removed 22-Jul per Mahesh — standalone utensils service discontinued
   // Sofa Cleaning task removed 03-Jun (per tester feedback — re-add when specialists onboarded)
-  {id:'t_party', name:'After Party Clean', price:199, mrp:375, icon:'🎉', color:'#D03878', desc:'Express post-party restore', unit:'session',
+  {id:'t_party', name:'After Party Clean', price:999, mrp:1499, icon:'🎉', color:'#D03878', desc:'Express post-party restore', unit:'session',
     includes:['Clearing leftover food and plates','Mopping and sweeping all party areas','Taking out garbage and bottles','Wiping tables, counters, and surfaces','Basic bathroom quick clean'],
     excludes:['Deep carpet stain removal','Vomit or biohazard waste cleanup','Broken glass collection without safety gear','Wall stain or marker removal','Furniture polish or restoration']},
   {id:'t_wm', name:'Washing Machine Clean', price:99, mrp:199, icon:'🫧', color:'#183880', desc:'Drum + exterior cleaning', unit:'machine',
@@ -837,7 +809,7 @@ const HOME_PACKAGES = [
     icon:'https://img.icons8.com/3d-fluency/128/broom.png',
     emoji:'🧹',
     desc:'Sweeping all rooms, wet mopping all floors, cleaning all utensils and dishes, cleaning sink',
-    mrp:250, price:99, popular:true, badge:'MOST BOOKED', color:'#C8541A', canSubscribe:true,
+    mrp:250, price:149, popular:true, badge:'MOST BOOKED', color:'#C8541A', canSubscribe:true,
     includes:['Sweeping all rooms','Wet mopping all floors','Cleaning all utensils and dishes','Cleaning kitchen sink thoroughly','Leaving sink area clean and dry'],
   },
   { id:'hp2',
@@ -848,14 +820,7 @@ const HOME_PACKAGES = [
     mrp:149, price:89, popular:false, badge:null, color:'#2C88D9', canSubscribe:true,
     includes:['Sweeping all rooms','Wet mopping all floors with clean water'],
   },
-  { id:'hp3',
-    name:'Utensils Cleaning Only',
-    icon:'https://img.icons8.com/3d-fluency/128/dishwasher.png',
-    emoji:'🍽️',
-    desc:'Cleaning all utensils, scrubbing pots and pans, cleaning sink, leaving sink area dry',
-    mrp:99, price:59, popular:false, badge:null, color:'#E87030', canSubscribe:false,
-    includes:['Cleaning all utensils (plates, cups, bowls, glasses)','Scrubbing pots, pans, pressure cooker, kadai','Cleaning kitchen sink thoroughly','Leaving sink area clean and completely dry','Cleaning dishes left soaking'],
-  },
+  // 'hp3' Utensils Cleaning Only removed 22-Jul per Mahesh — standalone utensils service discontinued
   { id:'hp4',
     name:'Basic Kitchen Cleaning',
     icon:'https://img.icons8.com/3d-fluency/128/kitchen.png',
@@ -885,7 +850,7 @@ const HOME_PACKAGES = [
     icon:'https://img.icons8.com/3d-fluency/128/fridge.png',
     emoji:'❄️',
     desc:'Wiping exterior and door seals, cleaning top, basic interior wipe, cleaning handle',
-    mrp:99, price:59, popular:false, badge:null, color:'#183880', canSubscribe:false,
+    mrp:299, price:199, popular:false, badge:null, color:'#183880', canSubscribe:false,
     includes:['Wiping exterior surfaces','Cleaning door seals and gaskets','Cleaning top of fridge','Basic interior wipe','Cleaning handle'],
   },
 ];
@@ -5046,7 +5011,7 @@ export default function App() {
           {emoji:'🪔',title:'Diwali Deep Clean',  sub:'Pre-festival special', discount:'30% OFF', color:C.orange},
           {emoji:'🌺',title:'Ugadi Package',       sub:'Full home refresh',    discount:'₹200 OFF',color:C.teal},
           {emoji:'💍',title:'Wedding Cleaning',    sub:'2-day service',        discount:'Book Now',color:C.purple},
-          {emoji:'🎂',title:'After Party Clean',   sub:'Express 2hr service',  discount:'₹199',    color:C.red},
+          {emoji:'🎂',title:'After Party Clean',   sub:'Express 2hr service',  discount:'₹999',    color:C.red},
         ].map((offer,i)=>(
           <TouchableOpacity key={i} style={{width:158,marginRight:12,borderRadius:22,backgroundColor:offer.color,padding:16,overflow:'hidden',...SHADOW.soft,shadowColor:offer.color}} onPress={()=>Alert.alert(offer.title,`${offer.sub}\n${offer.discount}`)}>
             <View style={{position:'absolute',top:-16,right:-16,width:70,height:70,borderRadius:35,backgroundColor:'rgba(255,255,255,0.1)'}}/>
