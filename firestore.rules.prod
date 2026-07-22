@@ -1,0 +1,91 @@
+// VEGA HOME SERVICES — PRODUCTION Firestore Rules (Tier-1: write-lockdown)
+// ════════════════════════════════════════════════════════════════════
+// Goal: close the dangerous WRITE attack surface with ZERO breakage to the
+// installed apps, deployable backend-only (no rebuild/OTA).
+//  • Reads stay auth-gated for now (read-lockdown = tested fast-follow; the
+//    installed apps do cross-user reads e.g. referral lookup, so locking reads
+//    needs an app change — see 19-Open-Items-Register F-read).
+//  • Writes are locked per-document (owner / assigned worker / ops) — no query
+//    analysis involved, so it cannot break the apps' read queries.
+// Ops = admin + hub-manager phones (mirrors the apps' hardcoded allowlists).
+// Verified by emulator suite before deploy. Replaces the fully-permissive rules.
+// ════════════════════════════════════════════════════════════════════
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null; }
+    function tokenPhone() { return request.auth.token.phone_number; }          // "+91XXXXXXXXXX"
+    function owns(bare) { return signedIn() && bare != null && tokenPhone() == '+91' + string(bare); }
+    function isOps() {
+      return signedIn() && tokenPhone() in [
+        '+919441270570', '+919000000004',                 // admins
+        '+919999999998', '+919133222344', '+919000000003' // hub managers
+      ];
+    }
+
+    // ── USERS ── read auth-gated (referral cross-read); write owner/ops only
+    match /users/{userId} {
+      allow read:   if signedIn();
+      allow create: if owns(userId) || isOps();
+      allow update: if owns(userId) || isOps();
+      allow delete: if false;
+      match /bookings/{b}  { allow read: if signedIn(); allow write: if owns(userId) || isOps(); }
+      match /addresses/{a} { allow read: if signedIn(); allow write: if owns(userId) || isOps(); }
+    }
+
+    // ── BOOKINGS ── create=stamp own phone; update=owner/assigned/ops
+    match /bookings/{id} {
+      allow read:   if signedIn();
+      allow create: if signedIn() && owns(request.resource.data.customerPhone);
+      allow update: if isOps()
+                    || owns(resource.data.customerPhone)
+                    || owns(resource.data.assignedWorkerPhone);
+      allow delete: if false;
+    }
+
+    // ── WORKERS ── create=ops; update=self(by phone) or ops
+    match /workers/{wid} {
+      allow read:   if signedIn();
+      allow create: if isOps();
+      allow update: if isOps() || owns(resource.data.phone);
+      allow delete: if false;
+      match /location_trail/{t} { allow read: if signedIn(); allow write: if signedIn(); }
+    }
+
+    // ── WALLET ── create for self only; immutable ledger
+    match /wallet_transactions/{t} {
+      allow read:   if isOps() || owns(resource.data.phone);
+      allow create: if signedIn() && owns(request.resource.data.phone);
+      allow update, delete: if false;
+    }
+
+    // ── ADMINS ── locked (apps use hardcoded ADMIN_PHONES, not this collection)
+    match /admins/{a} { allow read: if isOps(); allow create, update, delete: if false; }
+
+    // ── Config / catalog ── read-only to clients
+    match /app_config/{d}    { allow read: if d != 'payment_secrets'; allow write: if false; } // key_id public; secrets never here
+    match /areas/{a}         { allow read: if signedIn(); allow write: if false; }
+    match /professionals/{p} { allow read: if signedIn(); allow write: if false; }
+
+    // ── Misc collections ──
+    match /service_interests/{i} { allow read: if isOps();    allow create: if signedIn(); allow update, delete: if false; }
+    match /referrals/{r}         { allow read: if signedIn(); allow create: if signedIn(); allow update: if isOps(); allow delete: if false; }
+    match /complaints/{c}        { allow read: if signedIn(); allow create: if signedIn(); allow update: if isOps(); allow delete: if false; }
+    match /fcm_tokens/{t}        { allow read, write: if signedIn(); }
+    match /location_trail/{t}    { allow read: if signedIn(); allow create: if signedIn(); allow update: if signedIn(); allow delete: if false; }
+
+    // bug/area: keep create open (pre-login crash/notify flows); read/update ops only
+    match /bug_reports/{r}   { allow create: if true; allow read: if isOps(); allow update: if isOps(); allow delete: if false; }
+    match /area_requests/{r} { allow create: if true; allow read: if isOps(); allow update: if isOps(); allow delete: if false; }
+
+    match /deleted_accounts/{phone} { allow read: if signedIn(); allow write: if false; }
+    match /user_notifications/{phone}/items/{n} {
+      allow read:   if signedIn();
+      allow update: if owns(phone);
+      allow create, delete: if false;
+    }
+
+    match /{document=**} { allow read, write: if false; }
+  }
+}

@@ -23,6 +23,7 @@ import {
   StatusBar, ScrollView, Alert, SafeAreaView, Dimensions,
   Animated, Modal, ActivityIndicator, Platform, Image,
   Keyboard, KeyboardAvoidingView, TouchableWithoutFeedback, Linking,
+  BackHandler, Share,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import messaging from '@react-native-firebase/messaging';
@@ -43,7 +44,12 @@ import * as Updates from 'expo-updates';
 
 // OTA build label — bump this every release so user can verify which build is loaded.
 // Increment the number whenever you ship a new OTA so the user knows it landed.
-const OTA_BUILD_LABEL = 'v17 · 29-May · AutoCrash-Reporter';
+const OTA_BUILD_LABEL = 'v25 · 04-Jun · Offers tab (Snabbit-style eligibility)';
+
+// Minimum cart total (in ₹) required before a booking can be confirmed.
+// Below this, the user gets prompted to add more items. Prevents the
+// "no minimum charge" issue reported by testers on 03-Jun-2026.
+const MIN_BOOKING_AMOUNT = 99;  // ₹99 so the MOST BOOKED ₹99 Home package is bookable on its own (FIND-1)
 
 // ── Firestore Service Functions (inline — no separate file needed) ──
 const createOrUpdateUser = async (phone, data) => {
@@ -246,6 +252,67 @@ const submitBookingRating = async (orderId, userId, rating, note) => {
   } catch (e) { console.error('submitBookingRating:', e); return false; }
 };
 
+// ── REFERRAL CODE: apply a sharer's code to credit both users +₹200 ──
+// Called on first-time login (from name modal) when the new user enters
+// someone else's referral code. Safeguards:
+//   • Code must exist on another user's doc (referralCode field)
+//   • Cannot self-refer (same phone)
+//   • Cannot apply twice (referralApplied flag on this user)
+//   • Both users credited ₹200 + audit transactions logged
+const REFERRAL_BONUS = 200;
+const applyReferralCode = async (myPhone, code) => {
+  try {
+    const cleanCode = (code || '').trim().toUpperCase();
+    if (!cleanCode) return { ok: false, error: 'no_code' };
+    if (cleanCode.length < 4) return { ok: false, error: 'too_short' };
+
+    // 1. Look up the sharer by referralCode
+    const q = await firestore().collection('users')
+      .where('referralCode', '==', cleanCode).limit(1).get();
+    if (q.empty) return { ok: false, error: 'invalid_code' };
+
+    const sharerDoc = q.docs[0];
+    const sharerPhone = sharerDoc.id;
+    if (sharerPhone === myPhone) return { ok: false, error: 'self_referral' };
+
+    // 2. Check this user hasn't already applied a referral
+    const me = await getUser(myPhone);
+    if (!me) return { ok: false, error: 'user_missing' };
+    if (me.referralApplied) return { ok: false, error: 'already_applied' };
+
+    // 3. Credit both users in a transaction (atomic)
+    await firestore().runTransaction(async (tx) => {
+      const sRef = firestore().collection('users').doc(sharerPhone);
+      const mRef = firestore().collection('users').doc(myPhone);
+      const sSnap = await tx.get(sRef);
+      const mSnap = await tx.get(mRef);
+      const sBal  = (sSnap.data() || {}).walletBalance || 0;
+      const mBal  = (mSnap.data() || {}).walletBalance || 0;
+      tx.update(sRef, {
+        walletBalance: sBal + REFERRAL_BONUS,
+        referralCount: ((sSnap.data() || {}).referralCount || 0) + 1,
+      });
+      tx.update(mRef, {
+        walletBalance: mBal + REFERRAL_BONUS,
+        referralApplied: true,
+        referredBy: sharerPhone,
+        referredAt: firestore.FieldValue.serverTimestamp(),
+      });
+    });
+
+    // 4. Audit log (best-effort, outside transaction)
+    try {
+      await logWalletTransaction(sharerPhone, REFERRAL_BONUS, `referral_bonus:${myPhone}`, 'credit');
+      await logWalletTransaction(myPhone,    REFERRAL_BONUS, `referral_signup:${sharerPhone}`, 'credit');
+    } catch (_) {}
+
+    return { ok: true, sharerPhone, bonus: REFERRAL_BONUS };
+  } catch (e) {
+    console.error('applyReferralCode:', e);
+    return { ok: false, error: 'server_error', message: e.message };
+  }
+};
+
 const validatePromoCode = async (code) => {
   try {
     const doc = await firestore().collection('app_config').doc('promo_codes').get();
@@ -269,7 +336,10 @@ const listenToBooking = (orderId, callback) => {
 const DEMO_MODE = false;  // 🚀 PRODUCTION — Firebase active
 
 // ── FIX 1: OTP TEST PHONES — no browser redirect for these numbers
-const TEST_PHONES = ['9999999999','7777777701','9999999998','9133222344','1111111111'];
+// These MUST also be added to Firebase Console > Auth > Phone > "Phone numbers for testing"
+// with OTP 123456, otherwise real SMS is attempted (which triggers the reCAPTCHA page on iOS
+// when APNs is not fully configured).
+const TEST_PHONES = ['9999999999','7777777701','9999999998','9133222344','9441270570','7207719922','1111111111'];
 
 // ── FIX 2: GOOGLE MAPS STATIC API
 const MAPS_API_KEY = 'AIzaSyDIQw9tYW5x2NMHZWEIsMlsYkwdxYUbilU';
@@ -281,13 +351,24 @@ const DEFAULT_MAP_URL = `https://maps.googleapis.com/maps/api/staticmap?center=M
 
 // ── 3D ICONS — local bundled assets (no internet needed) ──────────────
 const SVC_ICONS = {
-  cleaning: require('./assets/icons/home-clean.png'),
-  bathroom: require('./assets/icons/bathroom.png'),
-  kitchen:  require('./assets/icons/kitchen.png'),
-  car:      require('./assets/icons/car-clean.png'),
-  beauty:   require('./assets/icons/beauty.png'),
-  // CDN fallbacks for icons not yet downloaded locally
-  sofa:     'https://img.icons8.com/3d-fluency/128/sofa.png',
+  // Custom VEGA 3D icon set (glossy pink, matching cohesive style) — local bundled
+  cleaning: require('./assets/icons3d/home-clean.png'),
+  bathroom: require('./assets/icons3d/bathroom.png'),
+  kitchen:  require('./assets/icons3d/kitchen.png'),
+  car:      require('./assets/icons3d/car-clean.png'),
+  beauty:   require('./assets/icons3d/beauty.png'),
+  sofa:     require('./assets/icons3d/sofa.png'),
+  // add-on / task icons (same 3D set)
+  mop:      require('./assets/icons3d/mop.png'),
+  utensils: require('./assets/icons3d/utensils.png'),
+  cupboard: require('./assets/icons3d/cupboard.png'),
+  fridge:   require('./assets/icons3d/fridge.png'),
+  fan:      require('./assets/icons3d/fan.png'),
+  dusting:  require('./assets/icons3d/dusting.png'),
+  ironing:  require('./assets/icons3d/ironing.png'),
+  window:   require('./assets/icons3d/window.png'),
+  laundry:  require('./assets/icons3d/laundry.png'),
+  // CDN fallbacks for services not yet in the custom set
   vacuum:   'https://img.icons8.com/3d-fluency/128/vacuum-cleaner.png',
   elder:    'https://img.icons8.com/3d-fluency/128/elderly-person.png',
   cook:     'https://img.icons8.com/3d-fluency/128/cooking-pot.png',
@@ -298,6 +379,9 @@ const SVC_ICON_MAP = {
   home: 'cleaning', bathroom: 'bathroom', kitchen: 'kitchen',
   car:  'car',      sofa:     'sofa',     beauty:  'beauty',
   deep: 'vacuum',   elder:    'elder',    cook:    'cook',   repair: 'repair',
+  // Home-cleaning packages → 3D icons
+  hp1: 'cleaning', hp2: 'mop', hp3: 'utensils', hp4: 'kitchen',
+  hp5: 'cupboard', hp6: 'kitchen', hp7: 'fridge',
 };
 // Helper — returns Image source for any service id (handles both local require + CDN uri)
 const svcImgSource = (svcId) => {
@@ -307,7 +391,7 @@ const svcImgSource = (svcId) => {
 };
 const SvcIcon = ({ id, emoji, size=40, style }) => {
   const [err, setErr] = React.useState(false);
-  const icon = SVC_ICONS[id];
+  const icon = SVC_ICONS[SVC_ICON_MAP[id] || id];
   if (!icon || err) return <Text style={{ fontSize:size*0.75, lineHeight:size, ...style }}>{emoji}</Text>;
   const source = typeof icon === 'string' ? { uri: icon } : icon;
   return <Image source={source} style={{ width:size, height:size, ...style }} resizeMode="contain" onError={()=>setErr(true)} />;
@@ -322,18 +406,18 @@ const COL = (W - 48) / 4;
 // ════════════════════════════════════════════════════════════════
 const C = {
   // Backgrounds
-  splash:     '#FDF6EE',
-  bg:         '#F8F3EE',   // --background: oklch(0.975 0.012 80)
+  splash:     '#FDF4F8',
+  bg:         '#FBF2F6',   // light pink background
   white:      '#FFFFFF',
-  card:       '#FEFCF8',   // --card: oklch(0.99 0.008 80) — slightly warmer than white
+  card:       '#FFFAFC',   // very light pink card
 
-  // Primary saffron
-  orange:     '#C8541A',   // --primary: oklch(0.66 0.18 45)
-  orange2:    '#E8621A',
-  orangeSoft: '#FF7A3D',
-  orangeBg:   'rgba(200,84,26,0.10)',   // translucent — web app style
-  orangeBd:   'rgba(200,84,26,0.22)',   // soft border
-  orangeSolid:'#FEF0E7',               // for icon backgrounds
+  // Primary — PINK brand
+  orange:     '#DB2777',   // pink-600 (primary brand color)
+  orange2:    '#EC4899',   // pink-500
+  orangeSoft: '#F472B6',   // pink-400
+  orangeBg:   'rgba(219,39,119,0.10)',   // translucent pink
+  orangeBd:   'rgba(219,39,119,0.22)',   // soft pink border
+  orangeSolid:'#FCE7F3',               // pink-50 icon background
 
   // Gold
   gold:       '#9A6B10',
@@ -355,7 +439,7 @@ const C = {
   // Shadows — 3-level system from web app
   shadowCard: 'rgba(100,40,10,0.12)',   // --shadow-card
   shadowSoft: 'rgba(100,40,10,0.18)',   // --shadow-soft
-  shadowGlow: 'rgba(200,84,26,0.40)',   // --shadow-glow (orange-tinted)
+  shadowGlow: 'rgba(219,39,119,0.40)',   // --shadow-glow (pink-tinted)
 
   // Status
   green:      '#1E6B3A',
@@ -397,12 +481,61 @@ const SHADOW = {
   floating: { elevation:12, shadowColor:'rgba(0,0,0,0.18)', shadowOffset:{width:0,height:-3}, shadowOpacity:0.15, shadowRadius:10 },
 };
 
+// ═══════════════════════════════════════════════════════════════════════
+// PROMO SYSTEM v2 (04-Jun-2026)
+// Replaces the unlimited "apply same code forever" bug. Every promo now has:
+//   • maxCap         — never give more than this much rupees off
+//   • minOrder       — cart must be at least this much
+//   • firstOrderOnly — only users with zero past bookings
+//   • ordersRange    — only at a specific order slot (e.g. 2nd order)
+//   • minOrders      — only after N completed bookings (loyalty)
+//   • maxUsesPerUser — lifetime cap per user
+//   • maxUsesPerDay  — once per day per user
+//   • maxUsesPerMonth— once per calendar month per user
+// Subscription bookings get the built-in 10% — no promo stacking on top.
+// Wallet credit DOES still apply on top of the promo discount.
+// ═══════════════════════════════════════════════════════════════════════
 const PROMOS = {
-  'VEGA50':  {type:'pct',  val:50,  label:'50% off — First order'},
-  'FIRST20': {type:'pct',  val:20,  label:'20% off — New user'},
-  'FLAT100': {type:'flat', val:100, label:'₹100 flat off'},
-  'VIZAG20': {type:'pct',  val:20,  label:'20% off — Vizag special'},
-  'VEGA2025':{type:'pct',  val:20,  label:'20% off — Welcome offer'},
+  // ─── 1st order (new user, lifetime once) ───
+  'WELCOME50': {
+    type:'pct', val:50, maxCap:200, minOrder:99,
+    firstOrderOnly:true, maxUsesPerUser:1,
+    label:'50% off your first order · max ₹200',
+  },
+  // Backwards-compat alias (existing marketing material still says VEGA50)
+  'VEGA50': {
+    type:'pct', val:50, maxCap:200, minOrder:99,
+    firstOrderOnly:true, maxUsesPerUser:1,
+    label:'50% off first order · max ₹200',
+  },
+
+  // ─── 2nd order (returning customer, lifetime once) ───
+  'COMEBACK30': {
+    type:'pct', val:30, maxCap:150, minOrder:99,
+    ordersRange:[1,1], maxUsesPerUser:1,
+    label:'30% off your second booking · max ₹150',
+  },
+
+  // ─── Loyal customer monthly (3+ bookings) ───
+  'LOYAL15': {
+    type:'pct', val:15, maxCap:100, minOrder:99,
+    minOrders:2, maxUsesPerMonth:1,
+    label:'15% off · once a month · max ₹100',
+  },
+
+  // ─── Anyone, daily one-tap ───
+  'DAILY10': {
+    type:'pct', val:10, maxCap:75, minOrder:99,
+    maxUsesPerDay:1,
+    label:'10% off · once a day · max ₹75',
+  },
+
+  // ─── Vizag launch special (anyone, lifetime once) ───
+  'VIZAG20': {
+    type:'pct', val:20, maxCap:100, minOrder:99,
+    maxUsesPerUser:1,
+    label:'20% off · Vizag launch special · max ₹100',
+  },
 };
 
 // PROFESSIONALS array (Lakshmi Devi, Priya Sharma, etc.) REMOVED — was used
@@ -537,9 +670,9 @@ const SERVICES = [
   { id:'car', name:'Car\nCleaning', shortName:'Car Cleaning', icon:'🚗', gradient:['#18A888','#0E5848'], shadow:'rgba(14,88,72,0.4)', iconBg:'#28C8A8', tagline:'Dry waterless cleaning — no water spraying', workerLabel:'Detailers', badge:'Eco Friendly',
     // carType: 'hatchback' | 'sedan' | 'suv'  — selected dynamically in step1
     carPricing:{
-      single:   {hatchback:100, sedan:130, suv:160},
+      single:   {hatchback:59,  sedan:59,  suv:59},
       weekly:   {hatchback:299, sedan:399, suv:399},
-      monthly:  {hatchback:499, sedan:649, suv:649},
+      monthly:  {hatchback:499, sedan:599, suv:599},
     },
     carExamples:{
       hatchback:'Swift, Alto, i10, WagonR, Baleno',
@@ -547,40 +680,28 @@ const SERVICES = [
       suv:      'Creta, Seltos, Brezza, XUV300',
     },
     durations:[
-      { id:'c1', label:'Single Clean (Outer Body)', price:100, mrp:200, popular:false,
+      { id:'c1', label:'Single Clean (Outer Body)', price:59, mrp:99, popular:false,
         duration:'20–30 mins',
         tasks:['Full outer body cleaning (doors, bonnet, boot)','All headlights & tail lights cleaned and shiny','All mirrors cleaned (streak-free)','Tyre surface wiped and cleaned','Window glass cleaned (outer side)','Number plate cleaned'],
-        note:'Exterior only — great for a quick refresh',
+        note:'Exterior only — one-time wash',
       },
-      { id:'c2', label:'Weekly Cleaning (Outer × 4/month)', price:299, mrp:499, popular:true,
+      { id:'c2', label:'Weekly Cleaning (Outer × 4/month)', price:299, mrp:499, popular:false,
         duration:'20–30 mins per visit',
         tasks:['Everything in Single Clean × 4 times per month','Same professional each visit','Same day & time every week (you choose once)','Automatic scheduling — no need to book each week'],
-        note:'Full month upfront — hassle-free weekly service',
+        note:'Full month upfront — hassle-free weekly outer service',
       },
-      { id:'c3', label:'Monthly Premium (Outer + Inner)', price:499, mrp:799, popular:false,
-        duration:'Outer 20–30 min · Inner 60 min (once)',
+      { id:'c3', label:'Monthly Premium (Outer × 4 + Inner × 1)', price:499, mrp:799, popular:true,
+        duration:'Outer 20–30 min · Inner 60 min (once a month)',
         tasks:['Outer body cleaning every week (4 visits/month)','1 inner cabin deep clean per month','Dashboard wiped & polished','All seats wiped','Door panels cleaned','Floor mats cleaned','Centre console wiped','Tyre cleaning every outer visit'],
-        note:'Full month upfront — complete premium care',
+        note:'⭐ MOST POPULAR — full month, complete premium care',
       },
     ],
     addons:[],
     covered:['Full outer body (dry/waterless method)','Headlights, tail lights, mirrors','Tyres & number plate','Outer window glass','Inner cabin (Monthly Premium package only)'],
     notCovered:['Water spraying — we use waterless method only','Inside cabin cleaning (Single / Weekly packages)','Under the car or engine bay','Dent or scratch repair','AC gas or servicing','Moving your car from parking'],
   },
-  { id:'sofa',    name:'Sofa\nCleaning', shortName:'Sofa Clean', icon:'🛋️',gradient:['#7840C8','#4E2480'],shadow:'rgba(78,36,128,0.4)',iconBg:'#9860E0',tagline:'Foam clean, stain removal & deodorize',workerLabel:'Specialists',badge:null,
-    durations:[
-      {id:'s1',hrs:1,label:'2-Seater',price:249,mrp:449,popular:false,tasks:['Foam extraction cleaning','Stain pre-treatment & removal','Deodorize with fresh spray','Surface dry — ready in 2 hours'],note:'2-seater or small sofa'},
-      {id:'s2',hrs:2,label:'3-Seater',price:349,mrp:649,popular:true, tasks:['Foam extraction cleaning','Stain pre-treatment & removal','Deodorize with fresh spray','Cushion covers cleaned','Surface dry — ready in 2 hours'],note:'Standard 3-seater sofa'},
-      {id:'s3',hrs:3,label:'Full Set', price:599,mrp:999,popular:false,tasks:['All sofa seats in living room','Foam extraction + stain removal','All cushion covers cleaned','Carpet or rug cleaning included','Deodorize entire living room'],note:'All sofas + carpet — full living room'},
-    ],
-    addons:[
-      {id:'carpet',  name:'Carpet Cleaning',  price:199,icon:'🏡',desc:'Full carpet shampoo + dry'},
-      {id:'mattress',name:'Mattress Clean',   price:149,icon:'🛏️',desc:'Vacuum + sanitize + deodorize'},
-      {id:'chair',   name:'Chair Cleaning',   price:99, icon:'🪑',desc:'Per dining/desk chair'},
-    ],
-    covered:['Foam extraction (professional machine)','Stain pre-treatment','All visible surface stains','Deodorizing & fresh spray','Cushion top cleaning','Surface dry within 2 hours'],
-    notCovered:['Torn or ripped fabric repair','Wooden frame polishing or repair','Structural damage','Pet urine deep saturation (may need extra session)','Antique or leather sofas (call us first)'],
-  },
+  // Sofa Cleaning removed 03-Jun per tester feedback (bug hRGT7Aabl8HG0sxbGsPf).
+  // Re-add when we have trained sofa specialists in Vizag.
   { id:'beauty',  name:'Beauty\nCare',   shortName:'Beauty Care',icon:'💆',gradient:['#D03878','#9A1848'],shadow:'rgba(154,24,72,0.4)', iconBg:'#E85898',tagline:'Salon services at your doorstep',workerLabel:'Beauticians',badge:'Women Loved',
     durations:[
       {id:'be1',hrs:1,label:'Basic Facial',   price:149, mrp:299, popular:false,tasks:['Skin cleansing','Scrub & exfoliation','Face pack — Lotus or Biotique products','Moisturizer application'],note:'45 minutes — everyday glow'},
@@ -605,7 +726,7 @@ const SERVICES = [
     addons:[
       {id:'pest', name:'Pest Control',     price:299,icon:'🐛',desc:'Cockroach + ant + mosquito treatment'},
       {id:'water',name:'Water Tank Clean', price:499,icon:'💧',desc:'Tank scrub + disinfect'},
-      {id:'sofa_d',name:'Sofa Deep Clean', price:349,icon:'🛋️',desc:'Add sofa foam extraction'},
+      // Sofa Deep Clean addon removed 03-Jun (per tester feedback)
     ],
     covered:['Every room — floor, walls, surfaces','Kitchen deep clean','Bathroom deep clean','Fan blades & light fixtures','Behind and under heavy appliances','Inside cupboard exterior','Balcony cleaning'],
     notCovered:['Exterior walls or compound area','Terrace or garden cleaning','Swimming pool','Pest control — book as add-on','Painting, plumbing or electrical work','Car cleaning — book separately'],
@@ -627,12 +748,19 @@ const SERVICES = [
 ];
 
 // ── Service Areas ──
-// SERVED_AREAS: where VEGA workers operate today (booking accepted)
+// SERVED_AREAS: where VEGA workers operate today (booking accepted).
 // COMING_SOON_AREAS: shown in picker but blocked — user can tap "Notify me"
 // to log demand into Firestore (area_requests collection) so we know where to expand.
-const SERVED_AREAS = ['Madhurawada', 'Yendada', 'PM Palem'];
+//
+// 03-Jun update: "PM Palem" expanded to its full name "Pothinamallayya Palem (PM Palem)"
+// for clarity to new users. Legacy users with the short name saved in their address
+// still validate correctly via the isServedArea() helper below.
+const SERVED_AREAS = ['Madhurawada', 'Yendada', 'Pothinamallayya Palem (PM Palem)'];
+const LEGACY_SERVED_ALIASES = new Set(['PM Palem']);   // historical names — accept on booking but never display
+const isServedArea = (a) => SERVED_AREAS.includes(a) || LEGACY_SERVED_ALIASES.has(a);
 const COMING_SOON_AREAS = ['Rushikonda', 'MVP Colony', 'Dwaraka Nagar', 'Kommadi', 'Seethammadhara', 'Gajuwaka', 'Pendurthi', 'Waltair', 'Siripuram'];
 const AREAS = [...SERVED_AREAS, ...COMING_SOON_AREAS];  // backwards-compat for code that iterates all areas
+const SERVED_AREAS_LABEL = 'Madhurawada, Yendada & Pothinamallayya Palem'; // for user-facing alert messages
 
 const logAreaRequest = async (phone, area) => {
   try {
@@ -686,9 +814,7 @@ const TASKS = [
       'Appliance repair or servicing',
       'Items outside the kitchen sink area',
     ]},
-  {id:'t_sofa', name:'Sofa Cleaning', price:249, mrp:449, icon:'🛋️', color:'#9860E0', desc:'Foam clean + stain removal', unit:'sofa',
-    includes:['Foam extraction cleaning (professional method)','Stain pre-treatment and removal','Cushion top surface cleaning','Deodorizing with fresh spray','Surface dry within 2 hours'],
-    excludes:['Torn or ripped fabric repair','Wooden frame polishing or repair','Structural damage fixes','Pet urine deep saturation (may need extra session)','Antique or leather sofas (call us first)']},
+  // Sofa Cleaning task removed 03-Jun (per tester feedback — re-add when specialists onboarded)
   {id:'t_party', name:'After Party Clean', price:199, mrp:375, icon:'🎉', color:'#D03878', desc:'Express post-party restore', unit:'session',
     includes:['Clearing leftover food and plates','Mopping and sweeping all party areas','Taking out garbage and bottles','Wiping tables, counters, and surfaces','Basic bathroom quick clean'],
     excludes:['Deep carpet stain removal','Vomit or biohazard waste cleanup','Broken glass collection without safety gear','Wall stain or marker removal','Furniture polish or restoration']},
@@ -701,7 +827,7 @@ const TASKS = [
 const COMING_SOON_TASKS = [
   {id:'cs_chimney',  name:'Chimney Cleaning',  emoji:'🔧', color:'#A84A10', desc:'Deep filter & mesh cleaning'},
   {id:'cs_mattress', name:'Mattress Cleaning',  emoji:'🛏️', color:'#4E2480', desc:'Vacuum + sanitize + deodorize'},
-  {id:'cs_sofa_deep',name:'Sofa Deep Cleaning', emoji:'🛋️', color:'#9860E0', desc:'Foam extraction & stain removal'},
+  // Sofa Deep removed from Coming Soon 03-Jun
 ];
 
 // ─── HOME CLEANING: 7 Task-Based Packages ────────────────────────────────────
@@ -909,7 +1035,150 @@ const StepBar = ({ step, total=4, labels }) => (
 // JS-only integration — no native package, no build needed.
 // Config (key_id, mode) read from Firestore at `app_config/payment`.
 // Admin updates the doc in Firebase Console to swap test↔live keys.
-const RazorpayCheckoutModal = ({ visible, amount, method, customer, onSuccess, onCancel, payConfig }) => {
+// ─── B1 fix: extracted to module scope so the browse tabs stop remounting ───
+// (these were defined INSIDE App() with useState called inside a .map loop —
+//  a Rules-of-Hooks violation that also remounted Home/Services on every render)
+const ComingSoonNotifyCard = ({ item, user, phone }) => {
+  const [notified, setNotified] = React.useState(false);
+  return (
+    <View style={{width:148,backgroundColor:C.card,borderRadius:20,padding:14,borderWidth:0.5,borderColor:C.border2,...SHADOW.card}}>
+      <View style={{width:52,height:52,borderRadius:16,backgroundColor:`${item.color}18`,alignItems:'center',justifyContent:'center',marginBottom:10,borderWidth:0.5,borderColor:`${item.color}30`}}>
+        <Text style={{fontSize:28}}>{item.emoji}</Text>
+      </View>
+      <Text style={{fontSize:13,fontWeight:'700',color:C.text,lineHeight:17,marginBottom:4}}>{item.name}</Text>
+      <Text style={{fontSize:10,color:C.muted,lineHeight:14,marginBottom:10}}>{item.desc}</Text>
+      <TouchableOpacity
+        style={{paddingVertical:7,borderRadius:20,alignItems:'center',
+          backgroundColor:notified?C.greenBg:`${item.color}15`,
+          borderWidth:0.5,borderColor:notified?C.greenBd:`${item.color}30`}}
+        onPress={()=>{
+          if(notified) return;
+          setNotified(true);
+          if(!DEMO_MODE && user){
+            firestore().collection('service_interests').add({
+              serviceId:item.id, serviceName:item.name,
+              userId:phone, userPhone:phone,
+              createdAt:firestore.FieldValue.serverTimestamp(),
+            }).catch(e=>console.log('service_interest:',e));
+          }
+        }}>
+        <Text style={{fontSize:10,fontWeight:'700',color:notified?C.green:item.color}}>
+          {notified?'✅ Notified!':'🔔 Notify Me'}
+        </Text>
+      </TouchableOpacity>
+    </View>
+  );
+};
+
+const ComingSoonNotifyRow = ({ task, user, phone }) => {
+  const [notified, setNotified] = React.useState(false);
+  return (
+    <View style={{flexDirection:'row',alignItems:'center',backgroundColor:C.card,marginHorizontal:16,marginBottom:10,borderRadius:20,padding:14,borderWidth:0.5,borderColor:C.border2,overflow:'hidden'}}>
+      <View style={{position:'absolute',left:0,top:0,bottom:0,width:5,backgroundColor:task.color}}/>
+      <View style={{width:52,height:52,borderRadius:16,backgroundColor:`${task.color}15`,alignItems:'center',justifyContent:'center',marginRight:14,marginLeft:10,borderWidth:0.5,borderColor:`${task.color}30`}}>
+        <Text style={{fontSize:26}}>{task.emoji}</Text>
+      </View>
+      <View style={{flex:1}}>
+        <DText style={{fontSize:14,fontWeight:'700',color:C.text}}>{task.name}</DText>
+        <Text style={{fontSize:12,color:C.muted,marginTop:2}} numberOfLines={1}>{task.desc}</Text>
+      </View>
+      <TouchableOpacity
+        style={{paddingHorizontal:12,paddingVertical:6,borderRadius:16,
+          backgroundColor:notified?C.greenBg:`${task.color}15`,
+          borderWidth:0.5,borderColor:notified?C.greenBd:`${task.color}30`}}
+        onPress={()=>{
+          if(notified) return;
+          setNotified(true);
+          if(!DEMO_MODE&&user){
+            firestore().collection('service_interests').add({
+              serviceId:task.id, serviceName:task.name,
+              userId:phone, userPhone:phone,
+              createdAt:firestore.FieldValue.serverTimestamp(),
+            }).catch(e=>console.log('service_interest:',e));
+          }
+        }}>
+        <Text style={{fontSize:11,fontWeight:'700',color:notified?C.green:task.color}}>
+          {notified?'✅ Notified':'🔔 Notify Me'}
+        </Text>
+      </TouchableOpacity>
+    </View>
+  );
+};
+
+// Stable OrderCard (was redefined inside BookingsTab every render → reset its expand state)
+const OrderCard = ({ o, orders, onOpen, onRate, onAgain }) => {
+  const childVisits = orders.filter(c =>
+    (c.parentSubscriptionId === o.orderId && c.isChildVisit) ||
+    (c.parentOrderId === o.orderId && c.isRecurringChild)
+  );
+  const [expanded,setExpanded]=React.useState(false);
+  const isSubscription = o.bookingMode === 'subscription';
+  const isMultiSchedule = o.bookingMode === 'scheduled' && (o.totalVisits || 1) > 1;
+  const hasMultipleVisits = isSubscription || isMultiSchedule;
+  return(
+    <TouchableOpacity style={{backgroundColor:C.card,borderRadius:22,marginBottom:10,overflow:'hidden',...SHADOW.soft}}
+      onPress={onOpen}>
+      <View style={{height:4,backgroundColor:isSubscription?C.teal:isMultiSchedule?C.gold:o.status==='completed'?C.green:C.orange}}/>
+      <View style={{padding:14}}>
+        <View style={{flexDirection:'row',justifyContent:'space-between',marginBottom:8}}>
+          <View style={{flexDirection:'row',alignItems:'center',gap:6}}>
+            <Text style={{color:C.orange,fontWeight:'700',fontSize:12}}>#{o.orderId}</Text>
+            {isSubscription && <View style={{backgroundColor:C.tealBg,paddingHorizontal:7,paddingVertical:2,borderRadius:8,borderWidth:0.5,borderColor:C.tealBd}}><Text style={{color:C.teal,fontSize:9,fontWeight:'700'}}>🔁 Subscription</Text></View>}
+            {isMultiSchedule && <View style={{backgroundColor:C.goldBg,paddingHorizontal:7,paddingVertical:2,borderRadius:8,borderWidth:0.5,borderColor:C.goldBd}}><Text style={{color:C.gold,fontSize:9,fontWeight:'700'}}>📅 {o.totalVisits} visits</Text></View>}
+          </View>
+          <View style={{flexDirection:'row',gap:6,alignItems:'center'}}>
+            {o.rated&&<Text style={{fontSize:10}}>{'⭐'.repeat(Math.min(o.rating||0,5))}</Text>}
+            <Badge label={o.status||'confirmed'} color={o.status==='completed'?C.green:o.status==='cancelled'?C.red:C.orange}/>
+          </View>
+        </View>
+        {o.items?.slice(0,2).map((item,i)=>(
+          <View key={i} style={{flexDirection:'row',alignItems:'center',gap:10,marginBottom:6}}>
+            <View style={{width:38,height:38,borderRadius:12,backgroundColor:C.orangeSolid,alignItems:'center',justifyContent:'center'}}><Text style={{fontSize:18}}>{item.icon}</Text></View>
+            <View style={{flex:1}}><Text style={{fontWeight:'600',color:C.text,fontSize:13}} numberOfLines={1}>{item.name}</Text></View>
+            <DText style={{color:C.orange,fontWeight:'700',fontSize:13}}>₹{item.price}</DText>
+          </View>
+        ))}
+        <View style={{height:0.5,backgroundColor:C.border,marginVertical:8}}/>
+        <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center'}}>
+          <Text style={{color:C.muted,fontSize:11,flex:1}} numberOfLines={1}>📅 {o.slot?.split('·')[0]||o.slot}</Text>
+          <View style={{flexDirection:'row',gap:6,alignItems:'center'}}>
+            <DText style={{color:C.orange,fontWeight:'700',fontSize:14}}>₹{o.total}</DText>
+            {!o.rated&&o.status==='completed'&&(
+              <TouchableOpacity style={{backgroundColor:C.orangeBg,paddingHorizontal:10,paddingVertical:4,borderRadius:16,borderWidth:0.5,borderColor:C.orangeBd}}
+                onPress={(e)=>{e.stopPropagation?.();onRate();}}>
+                <Text style={{color:C.orange,fontSize:11,fontWeight:'700'}}>Rate ⭐</Text>
+              </TouchableOpacity>
+            )}
+            {o.status==='completed'&&(
+              <TouchableOpacity style={{backgroundColor:C.orangeSolid,paddingHorizontal:10,paddingVertical:4,borderRadius:16,borderWidth:0.5,borderColor:C.orangeBd}}
+                onPress={(e)=>{e.stopPropagation?.();onAgain();}}>
+                <Text style={{color:C.orange,fontSize:11,fontWeight:'700'}}>🔄 Again</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        </View>
+        {hasMultipleVisits && childVisits.length > 0 && (
+          <TouchableOpacity style={{marginTop:8,backgroundColor:isSubscription?C.tealBg:C.goldSolid,borderRadius:10,padding:10,borderWidth:0.5,borderColor:isSubscription?C.tealBd:C.goldBd,flexDirection:'row',alignItems:'center',justifyContent:'space-between'}}
+            onPress={(e)=>{e.stopPropagation?.();setExpanded(ex=>!ex);}}>
+            <Text style={{color:isSubscription?C.teal:C.gold,fontWeight:'700',fontSize:11}}>📆 {childVisits.length} upcoming visits</Text>
+            <Text style={{color:isSubscription?C.teal:C.gold,fontSize:14}}>{expanded?'▲':'▼'}</Text>
+          </TouchableOpacity>
+        )}
+        {expanded && childVisits.map((cv,ci)=>(
+          <View key={ci} style={{backgroundColor:isSubscription?C.tealBg:C.goldSolid,marginTop:4,borderRadius:10,padding:10,flexDirection:'row',alignItems:'center',gap:8,borderWidth:0.5,borderColor:isSubscription?C.tealBd:C.goldBd}}>
+            <View style={{width:22,height:22,borderRadius:11,backgroundColor:isSubscription?C.teal:C.gold,alignItems:'center',justifyContent:'center'}}>
+              <Text style={{color:'#FFF',fontSize:10,fontWeight:'800'}}>{cv.visitNumber || (ci+2)}</Text>
+            </View>
+            <Text style={{fontSize:11,color:C.text,flex:1}} numberOfLines={1}>{cv.scheduledDate} {cv.scheduledTime?`at ${cv.scheduledTime}`:''}</Text>
+            <Badge label={cv.status||'scheduled'} color={isSubscription?C.teal:C.gold}/>
+          </View>
+        ))}
+      </View>
+    </TouchableOpacity>
+  );
+};
+
+const RazorpayCheckoutModal = ({ visible, amount, method, customer, onSuccess, onCancel, payConfig, orderId }) => {
   const handleMessage = (event) => {
     try {
       const data = JSON.parse(event.nativeEvent.data);
@@ -960,11 +1229,12 @@ function post(obj){
   }
 }
 try {
-  ${keyId ? '' : "document.getElementById('loader').style.display='none'; document.getElementById('err').innerHTML='Payment is being configured. Please try again in a few minutes or pay by Cash on Delivery.'; document.getElementById('err').style.display='block'; throw new Error('No Razorpay key configured');"}
+  ${(keyId && orderId) ? '' : "document.getElementById('loader').style.display='none'; document.getElementById('err').innerHTML='Payment is being configured. Please try again in a few minutes or pay by Cash on Delivery.'; document.getElementById('err').style.display='block'; throw new Error('No Razorpay key/order configured');"}
   const options = {
     key: ${JSON.stringify(keyId)},
     amount: ${amountPaise},
     currency: 'INR',
+    order_id: ${JSON.stringify(orderId || '')},
     name: 'VEGA Home Services',
     description: 'Service booking payment',
     image: 'https://img.icons8.com/3d-fluency/256/lotus.png',
@@ -1465,6 +1735,9 @@ export default function App() {
   // ── Issue 6: Customer name edit state ────────────────────────────────
   const [showNameModal, setShowNameModal] = useState(false);
   const [nameInput, setNameInput]         = useState('');
+  const [referralInput, setReferralInput] = useState('');   // Referral code entered on first-time signup
+  const [showReferralPrompt, setShowReferralPrompt] = useState(false); // Profile-side "Enter friend's code" modal
+  const [profileRefCode, setProfileRefCode] = useState('');
 
   // ── 🐛 Bug FAB component (renders button + modal; can be placed in any screen)
   // Defined inside App() so it closes over showBugModal state and context fields.
@@ -1516,6 +1789,8 @@ export default function App() {
     theme_color: '#C8541A',
   });
   const [showRazorpay, setShowRazorpay] = useState(false);
+  const [razorpayOrderId, setRazorpayOrderId] = useState(null);  // server-created Razorpay order id (secure flow)
+  const [startingPay, setStartingPay] = useState(false);         // guard while creating order / opening checkout
   const [pendingPayMethod, setPendingPayMethod] = useState(null);
 
   // ── Bug 4: Multi-date scheduling state ──────────────────────────
@@ -1543,6 +1818,61 @@ export default function App() {
     // Install global crash reporter — auto-fills bug_reports if anything goes wrong
     installGlobalErrorHandler({ userPhone: phone || null });
   }, []);
+
+  // ──────────────────────────────────────────────────────────────
+  // GLOBAL HARDWARE BACK HANDLER (Android)
+  // Without this, pressing the device back button on ANY screen
+  // falls through to the system → CLOSES THE APP.
+  //
+  // Priority: (1) close any open modal, (2) pop the screen stack,
+  // (3) on main/login/splash, let system exit.
+  // ──────────────────────────────────────────────────────────────
+  useEffect(() => {
+    const onBack = () => {
+      // 1. Close any open modal first (modals shadow screens)
+      if (showBugModal)   { setShowBugModal(false);   return true; }
+      if (showArea)       { setShowArea(false);       return true; }
+      if (showTerms)      { setShowTerms(false);      return true; }
+      if (showNameModal)  { setShowNameModal(false);  return true; }
+      if (showSearch)     { setShowSearch(false); setSearch(''); return true; }
+      if (showSaveAddr)   { setShowSaveAddr(false);   return true; }
+      if (showPayModal)   { setShowPayModal(false);   return true; }
+      if (showRazorpay)   { setShowRazorpay(false);   return true; }
+      if (showReferralPrompt) { setShowReferralPrompt(false); setProfileRefCode(''); return true; }
+      if (accountMode) { setAccountMode(null); return true; }
+
+      // 2. Screen-level back navigation
+      if (screen === 'step4')      { setScreen('step3'); return true; }
+      if (screen === 'step3')      { setScreen(selSvc?.id === 'home' ? 'step1' : 'step2'); return true; }
+      if (screen === 'step2')      { setScreen('step1'); return true; }
+      if (screen === 'step1')      { setScreen('main');  return true; }
+      if (screen === 'addresses')  { setScreen('main');  return true; }
+      if (screen === 'track')      { setScreen('main');  return true; }
+      if (screen === 'rate')       { setScreen('main');  return true; }
+      if (screen === 'taskDetail') { setScreen('main');  return true; }
+      if (screen === 'login')      { setScreen('main');  return true; }
+      if (screen === 'otp')        { setScreen('login'); setOtpError(''); setOtpVal(''); return true; }
+      if (screen === 'myReports')  { setScreen('main');  return true; }
+
+      // 3. Tab-level back navigation (when on main screen but not on home tab)
+      //    From any sub-tab (services / cart / bookings / offers / profile),
+      //    back goes to the home tab first — only the home tab exits.
+      if (screen === 'main' && tab && tab !== 'home') {
+        setTab('home');
+        return true;
+      }
+
+      // 4. On main+home / splash: allow system to exit (expected Android behaviour)
+      return false;
+    };
+    const sub = BackHandler.addEventListener('hardwareBackPress', onBack);
+    return () => sub.remove();
+  }, [
+    screen, selSvc, tab,
+    showBugModal, showArea, showTerms, showNameModal,
+    showSearch, showSaveAddr, showPayModal, showRazorpay,
+    showReferralPrompt, accountMode,
+  ]);
 
   useEffect(()=>{
     Animated.parallel([
@@ -1773,13 +2103,24 @@ export default function App() {
   },[trackOrd?.assignedWorkerId]);
 
   // ── Keep trackOrd in sync with live orders ─────────────────────────
-  // When worker taps On My Way / Service Started / Completed, the orders
-  // array updates via onSnapshot. Sync that into trackOrd so the tracking
-  // screen reflects status changes in real time (within ~3 seconds).
+  // BUG-D5QUUT fix: sync was checking only `status !== status`. When admin
+  // assigned a worker but status stayed the same (or already 'assigned' from
+  // a previous step), worker fields like assignedWorkerName/professional
+  // didn't propagate → screen stuck on "Finding a professional...".
+  // Now we sync whenever ANY relevant field differs.
   useEffect(()=>{
     if(!trackOrd) return;
     const updated = orders.find(o => o.id === trackOrd.id || o.orderId === trackOrd.orderId);
-    if(updated && updated.status !== trackOrd.status) setTrackOrd(updated);
+    if(!updated) return;
+    const changed =
+      updated.status              !== trackOrd.status              ||
+      updated.assignedWorkerName  !== trackOrd.assignedWorkerName  ||
+      updated.assignedWorkerPhone !== trackOrd.assignedWorkerPhone ||
+      updated.assignedWorkerId    !== trackOrd.assignedWorkerId    ||
+      updated.professional?.id    !== trackOrd.professional?.id    ||
+      updated.professional?.name  !== trackOrd.professional?.name  ||
+      updated.workerLocation      !== trackOrd.workerLocation;
+    if (changed) setTrackOrd(updated);
   },[orders]);
 
   const addonTotal  = selAddons.reduce((s,id)=>{const a=selSvc?.addons?.find(x=>x.id===id);return s+(a?a.price:0);},0);
@@ -1811,15 +2152,41 @@ export default function App() {
     bookMode === 'scheduled'    ? Math.max(1, schedVisits) :
     1;
 
-  // Base = cart × visits
-  const baseBeforeDisc = cartTotal * totalVisits;
+  // Base = cart × visits, BUT package items (e.g., car wash monthly) are
+  // already priced for the whole month — DO NOT multiply by visits.
+  // Without this guard, a ₹499 monthly car wash × 16 sub visits = ₹7,984.
+  const packageItemsTotal = cart.filter(i => i.isPackage).reduce((s,i) => s + i.price, 0);
+  const perVisitItemsTotal = cartTotal - packageItemsTotal;
+  const baseBeforeDisc = (perVisitItemsTotal * totalVisits) + packageItemsTotal;
 
   // Bug 5: 10% subscription discount on subscription bookings
   const subscriptionDiscount = bookMode === 'subscription' && subVisits > 0
     ? Math.round(baseBeforeDisc * 0.10) : 0;
 
   const recurBase = baseBeforeDisc - subscriptionDiscount;
-  const promoSave   = appliedPromo?appliedPromo.type==='pct'?Math.round(recurBase*appliedPromo.val/100):appliedPromo.val:0;
+  // Recompute promo savings live so the percentage adjusts with the cart total,
+  // but never exceed the promo's maxCap (this is the revenue protection).
+  const promoSave   = (() => {
+    if (!appliedPromo) return 0;
+    // Audit B8: subscriptions already include 10% off — never STACK a promo on top
+    // (e.g. applied in instant mode, then switched to subscription).
+    if (bookMode === 'subscription') return 0;
+    // Audit A6: if the cart dropped below the promo's minimum after it was applied,
+    // the discount is no longer valid — stop applying it (revenue protection).
+    if (appliedPromo.minOrder && recurBase < appliedPromo.minOrder) return 0;
+    let d;
+    if (appliedPromo.type === 'pct') {
+      d = Math.floor(recurBase * appliedPromo.val / 100);
+      if (appliedPromo.maxCap && d > appliedPromo.maxCap) d = appliedPromo.maxCap;
+    } else {
+      d = appliedPromo.val;
+      // Don't let a flat discount bring the cart below the promo's minOrder.
+      if (appliedPromo.minOrder && recurBase - d < appliedPromo.minOrder) {
+        d = Math.max(0, recurBase - appliedPromo.minOrder);
+      }
+    }
+    return d;
+  })();
   const walletSave  = useWallet?Math.min(wallet,recurBase-promoSave):0;
   // VEGA employs workers directly — no platform fee added (Issue 1 fix)
   const finalTotal  = Math.max(0,recurBase-promoSave-walletSave);
@@ -1831,20 +2198,33 @@ export default function App() {
 
   const openService = (svc)=>{
     setSelSvc(svc);
-    setSelDur(svc.durations.find(d=>d.popular)||svc.durations[0]);
-    setSelAddons([]);
+    // Default duration; for CAR, re-price it by the current car type so re-entry
+    // never reverts SUV/Sedan to the catalog hatchback price (audit A1 undercharge).
+    let _dur = svc.durations.find(d=>d.popular)||svc.durations[0];
+    if (svc.id==='car' && svc.carPricing && _dur) {
+      const _pk = _dur.id==='c1'?'single':_dur.id==='c2'?'weekly':'monthly';
+      _dur = {..._dur, price: svc.carPricing[_pk]?.[carType] || _dur.price};
+    }
+    setSelDur(_dur);
+    // If this service is ALREADY in the cart, restore its add-ons so a re-commit
+    // never silently drops them (this was the ₹133→₹99 wrong-charge bug).
+    const existingInCart = cart.find(i=>i.svcId===svc.id);
+    setSelAddons(existingInCart?.addonIds || []);
     setScreen('step1');
   };
 
   const buildCartItem = ()=>{
     if(!selSvc||!selDur) return null;
     const addonNames=selAddons.map(id=>selSvc.addons?.find(a=>a.id===id)?.name).filter(Boolean);
+    const isCarPackage = selSvc.id === 'car' && (selDur.id === 'c2' || selDur.id === 'c3');
     return {
       svcId:selSvc.id, id:selDur.id+'_'+Date.now(),
       icon:selSvc.icon, name:`${selSvc.shortName} — ${selDur.label}`,
       extras:addonNames,
+      addonIds:[...selAddons],
       price:totalPrice, mrp:selDur.mrp+addonTotal,
       color:selSvc.gradient[0], workers:1, durLabel:selDur.label,
+      isPackage: isCarPackage,
     };
   };
 
@@ -1866,9 +2246,179 @@ export default function App() {
     setScreen('step4');
   };
 
-  const applyPromo = ()=>{    const p=PROMOS[promoCode.trim().toUpperCase()];
-    if(p){setAppliedPromo(p);Alert.alert('Applied! 🎉',p.label);}
-    else Alert.alert('Invalid Code','Try: VEGA50, FIRST20, FLAT100, VIZAG20');
+  // ──────────────────────────────────────────────────────────────────────
+  // applyPromo — v2 (04-Jun-2026): real tier/usage checks against user's
+  // booking history so no single code can be used unlimited times.
+  // ──────────────────────────────────────────────────────────────────────
+  const applyPromo = () => {
+    const code = promoCode.trim().toUpperCase();
+    if (!code) { Alert.alert('Enter a code', 'Type your promo code first.'); return; }
+
+    const promo = PROMOS[code];
+    if (!promo) {
+      Alert.alert(
+        'Invalid Code',
+        'Try one of:\n\n' +
+        '🎁 WELCOME50  — 1st order, 50% off (max ₹200)\n' +
+        '🔁 COMEBACK30 — 2nd order, 30% off (max ₹150)\n' +
+        '⏰ DAILY10    — daily, 10% off (max ₹75)\n' +
+        '🪷 VIZAG20    — Vizag special, once'
+      );
+      return;
+    }
+
+    // Helper to read Firestore Timestamp / ISO / number → Date
+    const tsToDate = (ts) => {
+      if (!ts) return new Date(0);
+      if (typeof ts.toDate === 'function') return ts.toDate();
+      if (ts.seconds) return new Date(ts.seconds * 1000);
+      return new Date(ts);
+    };
+
+    // Count this user's prior bookings (exclude cancelled/failed)
+    const validOrders = (orders || []).filter(o =>
+      !['cancelled', 'failed', 'rejected'].includes(o.status)
+    );
+    const orderCount = validOrders.length;
+
+    // Usage history of THIS code by THIS user
+    const sameCodeUses = validOrders.filter(o => (o.promoCode || '').toUpperCase() === code);
+    const now = new Date();
+    const startOfDay   = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const usedToday     = sameCodeUses.filter(o => tsToDate(o.createdAt) >= startOfDay).length;
+    const usedThisMonth = sameCodeUses.filter(o => tsToDate(o.createdAt) >= startOfMonth).length;
+    const usedEver      = sameCodeUses.length;
+
+    // ── Rule checks ──
+    if (promo.minOrder && recurBase < promo.minOrder) {
+      Alert.alert('Cart too small', `This code needs a booking total of at least ₹${promo.minOrder}. Add another small service.`);
+      return;
+    }
+    if (promo.firstOrderOnly && orderCount > 0) {
+      Alert.alert(
+        'First-order only',
+        `WELCOME50 / VEGA50 are for first-time customers. You already have ${orderCount} order${orderCount > 1 ? 's' : ''}.\n\nTry COMEBACK30 (30% off, your second booking) or DAILY10 (10% off, daily).`
+      );
+      return;
+    }
+    if (promo.ordersRange) {
+      const [minN, maxN] = promo.ordersRange;
+      if (orderCount < minN || orderCount > maxN) {
+        const ordinals = ['1st', '2nd', '3rd'];
+        const target = ordinals[minN] || `${minN + 1}th`;
+        Alert.alert('Wrong booking number', `This code is reserved for your ${target} order only. You currently have ${orderCount} order${orderCount === 1 ? '' : 's'}.`);
+        return;
+      }
+    }
+    if (promo.minOrders && orderCount < promo.minOrders) {
+      Alert.alert('Loyalty code', `This code unlocks after ${promo.minOrders} completed bookings. You have ${orderCount}.`);
+      return;
+    }
+    if (promo.maxUsesPerUser && usedEver >= promo.maxUsesPerUser) {
+      Alert.alert('Already used', `You've already used this code ${usedEver === 1 ? 'once' : `${usedEver} times`}. Try a different one.`);
+      return;
+    }
+    if (promo.maxUsesPerDay && usedToday >= promo.maxUsesPerDay) {
+      Alert.alert('Used today', `You've already used this code today. Come back tomorrow for another go!`);
+      return;
+    }
+    if (promo.maxUsesPerMonth && usedThisMonth >= promo.maxUsesPerMonth) {
+      Alert.alert('Used this month', `You've already used this code this month. It refreshes on the 1st of next month.`);
+      return;
+    }
+
+    // Subscription + promo stacking guard — subscription customers already
+    // get a built-in 10% off, so no extra promo on top.
+    if (bookMode === 'subscription') {
+      Alert.alert(
+        'Subscription already discounted',
+        'Monthly subscriptions include a built-in 10% off. Promo codes only apply to one-time and scheduled bookings.'
+      );
+      return;
+    }
+
+    // Pre-compute the discount this user will actually get (for the success message)
+    let d;
+    if (promo.type === 'pct') {
+      d = Math.floor(recurBase * promo.val / 100);
+      if (promo.maxCap && d > promo.maxCap) d = promo.maxCap;
+    } else {
+      d = promo.val;
+      if (promo.minOrder && recurBase - d < promo.minOrder) {
+        d = Math.max(0, recurBase - promo.minOrder);
+      }
+    }
+
+    setAppliedPromo({ ...promo, code });
+    Alert.alert('🎉 Promo applied!', `${promo.label}\n\nYou save ₹${d} on this booking.`);
+  };
+
+  // ──────────────────────────────────────────────────────────────────────
+  // computePromoStatus — single-source-of-truth for the Offers tab.
+  // Reads the SAME rules applyPromo() uses, but returns a structured status
+  // instead of showing alerts. Used to colour-code each promo card as
+  // "Eligible / Locked" and show why.
+  // ──────────────────────────────────────────────────────────────────────
+  const computePromoStatus = (code) => {
+    const promo = PROMOS[code];
+    if (!promo) return { eligible: false, lockReason: 'Unknown code' };
+
+    const tsToDate = (ts) => {
+      if (!ts) return new Date(0);
+      if (typeof ts.toDate === 'function') return ts.toDate();
+      if (ts.seconds) return new Date(ts.seconds * 1000);
+      return new Date(ts);
+    };
+
+    const validOrders = (orders || []).filter(o =>
+      !['cancelled','failed','rejected'].includes(o.status)
+    );
+    const orderCount = validOrders.length;
+    const sameCodeUses = validOrders.filter(o => (o.promoCode || '').toUpperCase() === code);
+    const now = new Date();
+    const startOfDay   = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const usedToday     = sameCodeUses.filter(o => tsToDate(o.createdAt) >= startOfDay).length;
+    const usedThisMonth = sameCodeUses.filter(o => tsToDate(o.createdAt) >= startOfMonth).length;
+    const usedEver      = sameCodeUses.length;
+
+    // ── Lock checks ──
+    if (promo.firstOrderOnly && orderCount > 0)
+      return { eligible:false, lockReason:`First-booking only — you have ${orderCount} order${orderCount===1?'':'s'}` };
+    if (promo.ordersRange) {
+      const [minN, maxN] = promo.ordersRange;
+      if (orderCount < minN) return { eligible:false, lockReason:`Unlocks on your ${minN+1}${minN===0?'st':minN===1?'nd':'rd'} booking` };
+      if (orderCount > maxN) return { eligible:false, lockReason:`Only for booking #${maxN+1} — you've done more` };
+    }
+    if (promo.minOrders && orderCount < promo.minOrders)
+      return { eligible:false, lockReason:`Unlocks after ${promo.minOrders} bookings · you have ${orderCount}` };
+    if (promo.maxUsesPerUser && usedEver >= promo.maxUsesPerUser)
+      return { eligible:false, lockReason:`You've already used this code` };
+    if (promo.maxUsesPerDay && usedToday >= promo.maxUsesPerDay)
+      return { eligible:false, lockReason:`Used today · come back tomorrow` };
+    if (promo.maxUsesPerMonth && usedThisMonth >= promo.maxUsesPerMonth)
+      return { eligible:false, lockReason:`Used this month · refreshes on the 1st` };
+    if (bookMode === 'subscription')
+      return { eligible:false, lockReason:`Subscriptions already include 10% off` };
+
+    // Eligible — compute hypothetical savings on the current cart total
+    let savings = 0;
+    if (recurBase >= (promo.minOrder || 0)) {
+      if (promo.type === 'pct') {
+        savings = Math.floor(recurBase * promo.val / 100);
+        if (promo.maxCap && savings > promo.maxCap) savings = promo.maxCap;
+      } else {
+        savings = promo.val;
+        if (promo.minOrder && recurBase - savings < promo.minOrder)
+          savings = Math.max(0, recurBase - promo.minOrder);
+      }
+    }
+    return {
+      eligible: true,
+      savings,
+      needsMinOrder: recurBase < (promo.minOrder || 0) ? promo.minOrder : null,
+    };
   };
 
   const sendOTP = async()=>{
@@ -2076,13 +2626,22 @@ export default function App() {
     }
     // Validate address before opening Razorpay (same as placeOrder validations)
     if (cart.length === 0) { Alert.alert('Cart Empty', 'Please add a service first'); return; }
+    // Minimum booking guard — reject low-value bookings before payment opens
+    if (typeof recurBase === 'number' && recurBase < MIN_BOOKING_AMOUNT) {
+      Alert.alert(
+        `Add a bit more 🪷`,
+        `Our minimum booking is ₹${MIN_BOOKING_AMOUNT}. Your cart total is ₹${finalTotal}. Add another small service to continue.`,
+        [{ text: 'OK' }]
+      );
+      return;
+    }
     if (!flat || flat.trim().length === 0) { Alert.alert('Address Required', 'Please enter your flat / house number'); return; }
     if (!selArea) { Alert.alert('Area Required', 'Please pick your service area'); return; }
     // Block bookings from areas we don't serve yet — before payment, not after
-    if (!SERVED_AREAS.includes(selArea)) {
+    if (!isServedArea(selArea)) {
       Alert.alert(
         `Coming soon to ${selArea}!`,
-        `VEGA currently serves Madhurawada, Yendada & PM Palem. We're expanding — would you like a notification when we open in ${selArea}?`,
+        `VEGA currently serves ${SERVED_AREAS_LABEL}. We're expanding — would you like a notification when we open in ${selArea}?`,
         [
           { text: 'Pick another area', style: 'cancel' },
           { text: '🔔 Notify me', onPress: async () => {
@@ -2101,27 +2660,76 @@ export default function App() {
     if (bookMode === 'subscription' && (!subStartDate || !subEndDate || subDays.length === 0 || !selTime)) {
       Alert.alert('Subscription Incomplete', 'Please complete the subscription details'); return;
     }
+    // ── Secure payment: create a server-side Razorpay ORDER before checkout ──
+    // Binds the payment to a server order so its signature can be verified
+    // server-side (blocks fake-success spoofing). Plain fetch → no native
+    // dependency, stays OTA-deployable. Any failure falls back to Cash.
     setPendingPayMethod(selPayMethod);
+    if (startingPay) return;                       // guard against double-tap
+    setStartingPay(true);
+    try {
+      const cu = auth().currentUser;
+      if (!cu) {
+        setStartingPay(false);
+        Alert.alert('Please re-login', 'Your session has expired. Log in again, or choose Cash on Delivery for now.');
+        return;
+      }
+      const idToken = await cu.getIdToken();
+      const resp = await fetch('https://asia-south1-vega-home-service.cloudfunctions.net/createRazorpayOrder', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + idToken },
+        body: JSON.stringify({
+          amount: finalTotal,
+          // Audit A2: send the cart + breakdown so the server records/validates the charge
+          items: cart.map(i => ({ name: i.name, price: i.price, svcId: i.svcId })),
+          breakdown: { subtotal: baseBeforeDisc, promoDiscount: promoSave, walletUsed: walletSave, mode: bookMode, visits: totalVisits, promoCode: appliedPromo?.code || null },
+        }),
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || !data.order_id) {
+        setStartingPay(false);
+        Alert.alert('Payment Unavailable', `Couldn't start a secure payment right now. Please try again, or choose Cash on Delivery.\n\n(${data.error || ('HTTP ' + resp.status)})`);
+        return;
+      }
+      setRazorpayOrderId(data.order_id);
+    } catch (e) {
+      setStartingPay(false);
+      Alert.alert('Payment Unavailable', `Couldn't reach the payment server. Check your connection, or choose Cash on Delivery.\n\n(${e.message || 'network error'})`);
+      return;
+    }
+    setStartingPay(false);
     setShowRazorpay(true);
   };
 
   // Called by RazorpayCheckoutModal on payment.success
   const handleRazorpaySuccess = (payment) => {
     setShowRazorpay(false);
+    setRazorpayOrderId(null);
     // Pass payment metadata into placeOrder so it gets saved on the booking doc
-    placeOrder({ razorpayPaymentId: payment.paymentId, razorpaySignature: payment.signature, paymentGateway: 'razorpay' });
+    placeOrder({ razorpayPaymentId: payment.paymentId, razorpayOrderId: payment.orderId, razorpaySignature: payment.signature, paymentGateway: 'razorpay' });
   };
 
   // Called by RazorpayCheckoutModal on payment.failed or cancel
   const handleRazorpayCancel = (reason) => {
     setShowRazorpay(false);
+    setRazorpayOrderId(null);
     if (reason && reason !== 'Closed by user' && reason !== 'Payment cancelled') {
       Alert.alert('Payment Failed', reason);
     }
   };
 
   const placeOrder = async(paymentInfo = null)=>{
+    if(placing) return; // re-entrancy guard: prevent double booking on fast double-tap
     if(!user){Alert.alert('Login Required','',[ {text:'Login',onPress:()=>setScreen('login')} ]);return;}
+    // Minimum booking guard — also enforced for Cash on Delivery path
+    if (typeof recurBase === 'number' && recurBase < MIN_BOOKING_AMOUNT) {
+      Alert.alert(
+        `Add a bit more 🪷`,
+        `Our minimum booking is ₹${MIN_BOOKING_AMOUNT}. Your cart total is ₹${finalTotal}. Add another small service to continue.`,
+        [{ text: 'OK' }]
+      );
+      return;
+    }
     // Validate per mode
     if(bookMode==='scheduled'){
       if(!selTime){Alert.alert('Time Required','Please select a time slot');return;}
@@ -2159,10 +2767,10 @@ export default function App() {
     if(!flat || flat.trim().length===0){Alert.alert('Address Required','Please enter your flat / house number');return;}
     if(!selArea){Alert.alert('Area Required','Please pick your service area');return;}
     // Defense-in-depth: block bookings from areas where we don't operate yet
-    if(!SERVED_AREAS.includes(selArea)){
+    if(!isServedArea(selArea)){
       Alert.alert(
         `Coming soon to ${selArea}!`,
-        `VEGA currently serves Madhurawada, Yendada & PM Palem. We're expanding — would you like a notification when we open in ${selArea}?`,
+        `VEGA currently serves ${SERVED_AREAS_LABEL}. We're expanding — would you like a notification when we open in ${selArea}?`,
         [
           { text: 'Pick another area', style: 'cancel' },
           { text: '🔔 Notify me', onPress: async () => {
@@ -2197,6 +2805,13 @@ export default function App() {
       setSelDatesMulti([]);      // Bug 4 reset
       setSubStartDate(null);     // Bug 5 reset
       setSubEndDate(null);
+      // Audit B4: clear booking-draft state that used to LEAK into the next booking
+      setSelPkgs({});
+      setBookMode('instant');
+      setSubDays([1, 3, 5]);
+      setCarType('hatchback');
+      setCalSelDate(null);
+      setRazorpayOrderId(null);
       setPlacing(false);
     };
 
@@ -2249,7 +2864,7 @@ export default function App() {
         assignedWorkerName: null,
         assignedWorkerPhone: null,
         items: cart,
-        subtotal: totalPrice,
+        subtotal: baseBeforeDisc,
         total: finalTotal,
         promoCode: appliedPromo?.code||null,
         promoDiscount: promoSave||0,
@@ -2293,6 +2908,7 @@ export default function App() {
         // Razorpay payment metadata (when paid online)
         paymentGateway: paymentInfo?.paymentGateway || (selPayMethod==='cash' ? null : 'razorpay'),
         razorpayPaymentId: paymentInfo?.razorpayPaymentId || null,
+        razorpayOrderId: paymentInfo?.razorpayOrderId || null,
         razorpaySignature: paymentInfo?.razorpaySignature || null,
         razorpayMode: payConfig.razorpay_mode || 'test',
       };
@@ -2341,7 +2957,7 @@ export default function App() {
               batch.set(docRef, {
                 ...bookingData,
                 orderId: nextOrderId,
-                otp: Math.floor(1000 + Math.random() * 9000).toString(),
+                otp: result.otp,   // Audit B5: share the PARENT's OTP so every visit uses the one code the customer sees
                 status: 'pending',
                 slot: nextSlot,
                 scheduledDate: dateStr,
@@ -2372,7 +2988,7 @@ export default function App() {
           } catch (_) {}
           Alert.alert(
             '⚠️ Visits Partially Saved',
-            `Your first visit is booked, but the ${childDates.length} follow-up visits could not be saved automatically. Our team has been notified and will create them within 1 hour. Call +91 9441270570 if urgent. Order: ${result.orderId}`,
+            `Your first visit is booked, but the ${childDates.length} follow-up visits could not be saved automatically. Our team has been notified and will create them within 1 hour. Call +91 7207719922 if urgent. Order: ${result.orderId}`,
           );
         }
       }
@@ -2634,7 +3250,7 @@ export default function App() {
         <StepBar step={0} total={4} labels={['Service','Add-ons','Schedule','Address']}/>
 
         {/* Terms Modal */}
-        <Modal visible={showTerms} animationType="slide" transparent>
+        <Modal visible={showTerms} animationType="slide" transparent onRequestClose={()=>setShowTerms(false)}>
           <View style={{flex:1,backgroundColor:'rgba(24,8,10,0.55)',justifyContent:'flex-end'}}>
             <View style={{backgroundColor:C.white,borderTopLeftRadius:28,borderTopRightRadius:28,maxHeight:'78%'}}>
               <View style={{height:4,width:40,backgroundColor:C.border,borderRadius:2,alignSelf:'center',marginTop:12}}/>
@@ -2710,7 +3326,7 @@ export default function App() {
                     <View style={{padding:16,flexDirection:'row',alignItems:'flex-start',gap:12}}>
                       {/* 3D Icon */}
                       <View style={{width:58,height:58,borderRadius:16,backgroundColor:`${pkg.color}15`,alignItems:'center',justifyContent:'center',borderWidth:0.5,borderColor:`${pkg.color}30`}}>
-                        <SvcIcon id={pkg.emoji} emoji={pkg.emoji} size={36}/>
+                        <SvcIcon id={pkg.id} emoji={pkg.emoji} size={36}/>
                       </View>
                       <View style={{flex:1}}>
                         <Text style={{fontSize:14,fontWeight:'700',color:C.text,marginBottom:3,lineHeight:19}} numberOfLines={2}>{pkg.name}</Text>
@@ -2891,7 +3507,8 @@ export default function App() {
                       svcId:'home', id:p.id+'_'+Date.now(), icon:'🏠', name:p.name,
                       extras:[], price:p.price, mrp:p.mrp, color:C.orange, workers:1, durLabel:p.name,
                     }));
-                    setCart(items);
+                    // Merge: keep any non-home service already in the cart; replace only the home rows.
+                    setCart(prev=>[...prev.filter(i=>i.svcId!=='home'), ...items]);
                     setScreen('step3');
                   }}>
                   <Text style={S.ctaBtnT}>Schedule →</Text>
@@ -3161,7 +3778,7 @@ export default function App() {
         </View>
         <View style={{height:3,backgroundColor:C.orange}}/>
         <StepBar step={3} total={4} labels={['Service','Add-ons','Schedule','Address']}/>
-        <Modal visible={showArea} animationType="slide" transparent>
+        <Modal visible={showArea} animationType="slide" transparent onRequestClose={()=>setShowArea(false)}>
           <View style={{flex:1,backgroundColor:'rgba(24,8,10,0.5)',justifyContent:'flex-end'}}>
             <View style={{backgroundColor:C.white,borderTopLeftRadius:28,borderTopRightRadius:28,maxHeight:'60%'}}>
               <View style={{height:4,width:40,backgroundColor:C.border,borderRadius:2,alignSelf:'center',marginTop:12}}/>
@@ -3194,7 +3811,7 @@ export default function App() {
                     onPress={()=>{
                       Alert.alert(
                         `Coming soon to ${a}!`,
-                        `VEGA currently serves Madhurawada, Yendada & PM Palem. We're expanding fast — would you like us to notify you when we launch in ${a}?`,
+                        `VEGA currently serves ${SERVED_AREAS_LABEL}. We're expanding fast — would you like us to notify you when we launch in ${a}?`,
                         [
                           { text: 'Pick another area', style: 'cancel' },
                           { text: '🔔 Notify me', onPress: async () => {
@@ -3336,7 +3953,7 @@ export default function App() {
           <Card style={{marginBottom:12}}>
             <Text style={{fontWeight:'700',color:C.text,marginBottom:10}}>🎟️ Promo Code</Text>
             <View style={{flexDirection:'row',gap:10}}>
-              <TextInput style={[S.inp,{flex:1,marginBottom:0,paddingVertical:10,borderRadius:20}]} placeholder="VEGA50 · FIRST20 · FLAT100" placeholderTextColor={C.muted2} value={promoCode} onChangeText={setPromoCode} autoCapitalize="characters"/>
+              <TextInput style={[S.inp,{flex:1,marginBottom:0,paddingVertical:10,borderRadius:20}]} placeholder="WELCOME50 · COMEBACK30 · DAILY10" placeholderTextColor={C.muted2} value={promoCode} onChangeText={setPromoCode} autoCapitalize="characters"/>
               <TouchableOpacity style={{backgroundColor:C.orange,borderRadius:20,paddingHorizontal:16,alignItems:'center',justifyContent:'center',...SHADOW.glow}} onPress={applyPromo}>
                 <Text style={{color:'#FFF',fontWeight:'700',fontSize:13}}>Apply</Text>
               </TouchableOpacity>
@@ -3347,7 +3964,7 @@ export default function App() {
                 <TouchableOpacity onPress={()=>{setAppliedPromo(null);setPromoCode('');}}><Text style={{color:C.red,fontSize:12}}>Remove</Text></TouchableOpacity>
               </View>
             )}
-            <Text style={{color:C.muted,fontSize:11,marginTop:8}}>Try: VEGA50 | FIRST20 | FLAT100 | VIZAG20</Text>
+            <Text style={{color:C.muted,fontSize:11,marginTop:8}}>Try: WELCOME50 | COMEBACK30 | DAILY10 | VIZAG20</Text>
           </Card>
           <TouchableOpacity style={{backgroundColor:C.goldSolid,borderRadius:20,padding:14,marginBottom:12,flexDirection:'row',alignItems:'center',borderWidth:0.5,borderColor:C.goldBd}} onPress={()=>setUseWallet(w=>!w)}>
             <View style={{width:42,height:42,borderRadius:14,backgroundColor:C.goldBd,alignItems:'center',justifyContent:'center',marginRight:12}}><Text style={{fontSize:20}}>💰</Text></View>
@@ -3477,7 +4094,7 @@ export default function App() {
                     <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{marginBottom:14}}>
                       {[7, 14, 30, 60, 90].map((days)=>{
                         const d = new Date(subStartDate);
-                        d.setDate(d.getDate() + days);
+                        d.setDate(d.getDate() + days - 1);  // Audit A7: inclusive window — "1 Week"=7 days, not 8
                         const isSelected = subEndDate && subEndDate.toDateString() === d.toDateString();
                         return (
                           <TouchableOpacity key={days}
@@ -3569,8 +4186,8 @@ export default function App() {
               </TouchableOpacity>
             ))}
           </Card>
-          <TouchableOpacity style={[S.btn,{paddingVertical:18,borderRadius:30,...SHADOW.glow},placing&&{opacity:0.4}]} disabled={placing} onPress={handleConfirmBooking}>
-            {placing?<ActivityIndicator color="#FFF"/>:<Text style={[S.btnT,{fontSize:17}]}>🔒 Confirm Booking — ₹{finalTotal}</Text>}
+          <TouchableOpacity style={[S.btn,{paddingVertical:18,borderRadius:30,...SHADOW.glow},(placing||startingPay)&&{opacity:0.4}]} disabled={placing||startingPay} onPress={handleConfirmBooking}>
+            {(placing||startingPay)?<ActivityIndicator color="#FFF"/>:<Text style={[S.btnT,{fontSize:17}]}>🔒 Confirm Booking — ₹{finalTotal}</Text>}
           </TouchableOpacity>
           <View style={{height:40}}/>
         </ScrollView>
@@ -3580,6 +4197,7 @@ export default function App() {
           method={pendingPayMethod || selPayMethod}
           customer={{ name: user?.name || '', phone: phone || '' }}
           payConfig={payConfig}
+          orderId={razorpayOrderId}
           onSuccess={handleRazorpaySuccess}
           onCancel={handleRazorpayCancel}
         />
@@ -3587,8 +4205,8 @@ export default function App() {
             were moved from here to the main screen render so they show from
             the Profile tab. This block intentionally left as a comment marker. */}
 
-        {/* Issue 6: Name edit modal */}
-        <Modal visible={showNameModal} transparent animationType="fade">
+        {/* Issue 6: Name edit modal + Referral code on first-time signup */}
+        <Modal visible={showNameModal} transparent animationType="fade" onRequestClose={()=>setShowNameModal(false)}>
           <View style={{flex:1,backgroundColor:'rgba(0,0,0,0.6)',justifyContent:'center',padding:24}}>
             <View style={{backgroundColor:'#FFF',borderRadius:20,padding:24}}>
               <Text style={{fontWeight:'700',fontSize:18,color:C.text,marginBottom:6}}>What should we call you?</Text>
@@ -3600,18 +4218,54 @@ export default function App() {
                 onChangeText={setNameInput}
                 autoFocus
               />
+              <Text style={{fontWeight:'700',fontSize:14,color:C.text,marginBottom:4}}>🎁 Have a referral code?</Text>
+              <Text style={{color:C.muted,fontSize:12,marginBottom:8}}>Optional — enter your friend's code. Both of you get ₹200!</Text>
+              <TextInput
+                style={{borderWidth:1,borderColor:C.border,borderRadius:14,padding:14,fontSize:15,color:C.text,marginBottom:14,letterSpacing:3,fontWeight:'700',textTransform:'uppercase'}}
+                placeholder="VG12345"
+                value={referralInput}
+                onChangeText={t=>setReferralInput(t.toUpperCase().replace(/[^A-Z0-9]/g,''))}
+                autoCapitalize="characters"
+                maxLength={10}
+              />
               <View style={{flexDirection:'row',gap:10}}>
-                <TouchableOpacity style={{flex:1,padding:14,borderRadius:14,borderWidth:1,borderColor:C.border,alignItems:'center'}} onPress={()=>setShowNameModal(false)}>
+                <TouchableOpacity style={{flex:1,padding:14,borderRadius:14,borderWidth:1,borderColor:C.border,alignItems:'center'}} onPress={()=>{setShowNameModal(false);setReferralInput('');}}>
                   <Text style={{color:C.muted,fontWeight:'600'}}>Later</Text>
                 </TouchableOpacity>
                 <TouchableOpacity style={{flex:1,padding:14,borderRadius:14,backgroundColor:C.orange,alignItems:'center'}} onPress={async()=>{
                   const n = nameInput.trim();
                   if (n.length < 2) { Alert.alert('Name too short','Please enter at least 2 characters'); return; }
                   if (user && phone) {
-                    await createOrUpdateUser(phone, { name: n });
+                    const savedOk = await createOrUpdateUser(phone, { name: n });
+                    if (!savedOk) { Alert.alert('Could not save name', 'Please check your internet and try again.'); return; }
                     setUser(u => u ? { ...u, name: n } : u);
+
+                    // ── Apply referral code if entered ──
+                    const code = referralInput.trim().toUpperCase();
+                    if (code) {
+                      const r = await applyReferralCode(phone, code);
+                      if (r.ok) {
+                        // Refresh local wallet
+                        const fresh = await getUser(phone);
+                        if (fresh) {
+                          setWallet(fresh.walletBalance || 0);
+                          setUser(u => u ? { ...u, walletBalance: fresh.walletBalance || 0 } : u);
+                        }
+                        Alert.alert('🎉 Referral applied!', `You and your friend each got ₹${r.bonus} in VEGA wallet.`);
+                      } else {
+                        const errMap = {
+                          invalid_code: 'That code does not match any VEGA user.',
+                          self_referral: 'You cannot use your own referral code.',
+                          already_applied: 'You have already used a referral code on this account.',
+                          too_short: 'Referral code looks too short.',
+                          server_error: 'Could not apply code right now. Try later from Profile.',
+                        };
+                        Alert.alert('Referral not applied', errMap[r.error] || 'Code could not be applied.');
+                      }
+                    }
                   }
                   setShowNameModal(false);
+                  setReferralInput('');
                 }}>
                   <Text style={{color:'#FFF',fontWeight:'700'}}>Save</Text>
                 </TouchableOpacity>
@@ -3630,7 +4284,7 @@ export default function App() {
     return(
       <SafeAreaView style={{flex:1,backgroundColor:C.bg}}>
         <View style={S.topBar}>
-          <TouchableOpacity onPress={()=>setScreen('home')} style={S.backBtn}>
+          <TouchableOpacity onPress={()=>setScreen('main')} style={S.backBtn}>
             <Text style={{fontSize:20,color:C.text}}>‹</Text>
           </TouchableOpacity>
           <DText style={{fontSize:17,fontWeight:'700',color:C.text}}>Service details</DText>
@@ -3710,7 +4364,7 @@ export default function App() {
                   <Text style={{color:'#FFF',fontSize:18,fontWeight:'900',lineHeight:22}}>+</Text>
                 </TouchableOpacity>
               </View>
-              <TouchableOpacity onPress={()=>setScreen('home')} style={{flex:1,backgroundColor:C.orange,borderRadius:14,paddingVertical:14,alignItems:'center',...SHADOW.glow,shadowColor:C.orange}}>
+              <TouchableOpacity onPress={()=>{setScreen('main');setTab('home');}} style={{flex:1,backgroundColor:C.orange,borderRadius:14,paddingVertical:14,alignItems:'center',...SHADOW.glow,shadowColor:C.orange}}>
                 <Text style={{color:'#FFF',fontSize:14,fontWeight:'700'}}>Added · ₹{activeTask.price*qty} ›</Text>
               </TouchableOpacity>
             </>
@@ -3724,14 +4378,17 @@ export default function App() {
   // ── TRACK ──────────────────────────────────────────────────────────
   // Area → approximate GPS coordinates for Visakhapatnam
   const AREA_COORDS = {
-    'Madhurawada':    [17.7763, 83.3653],
-    'Rushikonda':     [17.7619, 83.3895],
-    'MVP Colony':     [17.7256, 83.3191],
-    'Gajuwaka':       [17.6866, 83.2091],
-    'Seethammadhara': [17.7301, 83.3234],
-    'Dwaraka Nagar':  [17.7201, 83.3012],
-    'BHPV':           [17.6821, 83.2184],
-    'Kommadi':        [17.7932, 83.3742],
+    'Madhurawada':                        [17.7763, 83.3653],
+    'Yendada':                            [17.7651, 83.3604],
+    'Pothinamallayya Palem (PM Palem)':   [17.7805, 83.3720],
+    'PM Palem':                           [17.7805, 83.3720],  // legacy alias — saved addresses may still use this
+    'Rushikonda':                         [17.7619, 83.3895],
+    'MVP Colony':                         [17.7256, 83.3191],
+    'Gajuwaka':                           [17.6866, 83.2091],
+    'Seethammadhara':                     [17.7301, 83.3234],
+    'Dwaraka Nagar':                      [17.7201, 83.3012],
+    'BHPV':                               [17.6821, 83.2184],
+    'Kommadi':                            [17.7932, 83.3742],
   };
 
   const buildTrackMapHtml = (workerLat, workerLng, destArea) => {
@@ -3944,7 +4601,8 @@ export default function App() {
                   </View>
                   <Text style={{fontSize:12,color:C.muted}}>Verified · VEGA trained</Text>
                 </View>
-                <TouchableOpacity style={{width:44,height:44,borderRadius:22,backgroundColor:C.greenBg,alignItems:'center',justifyContent:'center',borderWidth:0.5,borderColor:C.greenBd,...SHADOW.card}}>
+                <TouchableOpacity style={{width:44,height:44,borderRadius:22,backgroundColor:C.greenBg,alignItems:'center',justifyContent:'center',borderWidth:0.5,borderColor:C.greenBd,...SHADOW.card}}
+                  onPress={()=>{const p=trackOrd.assignedWorkerPhone||trackOrd.professional?.phone;if(p)Linking.openURL('tel:+91'+p);else Alert.alert('Not available yet','The number appears once a professional is assigned.');}}>
                   <Text style={{fontSize:20}}>📞</Text>
                 </TouchableOpacity>
               </View>
@@ -3957,7 +4615,7 @@ export default function App() {
                 ref={trackMapRef}
                 source={{ html: buildTrackMapHtml(
                   workerLoc?.lat, workerLoc?.lng,
-                  trackOrd?.area || selArea || 'Madhurawada'
+                  trackOrd?.address?.area || trackOrd?.area || selArea || 'Madhurawada'
                 )}}
                 style={{flex:1,backgroundColor:'#0F0A06'}}
                 scrollEnabled={false}
@@ -3979,7 +4637,7 @@ export default function App() {
             </View>
             <View style={{padding:14,flexDirection:'row',justifyContent:'space-between',alignItems:'center'}}>
               <View>
-                <Text style={{fontWeight:'700',color:C.text}}>📍 {trackOrd?.area||selArea||'Visakhapatnam'}</Text>
+                <Text style={{fontWeight:'700',color:C.text}}>📍 {trackOrd?.address?.area||trackOrd?.area||selArea||'Visakhapatnam'}</Text>
                 <Text style={{color:C.muted,fontSize:12,marginTop:2}}>
                   {workerLoc ? '🏍️ Worker location updating live' : 'Professional assigned — locating...'}
                 </Text>
@@ -4054,6 +4712,49 @@ export default function App() {
               }}>
               <Text style={{fontSize:18}}>🔄</Text>
               <Text style={{color:C.orange,fontWeight:'800',fontSize:15}}>Book Again</Text>
+            </TouchableOpacity>
+          )}
+
+          {/* ── CANCEL BOOKING — one-time only, before the worker is dispatched.
+                 Subscriptions are intentionally NOT cancellable by the customer.
+                 Setting status:'cancelled' triggers processRefundOnCancel (auto full refund). ── */}
+          {trackOrd.bookingMode !== 'subscription'
+            && !['on_the_way','in_progress','completed','cancelled','rejected'].includes(trackOrd.status || '')
+            && trackOrd.id && (
+            <TouchableOpacity
+              style={{marginTop:10,borderWidth:1.5,borderColor:'#C0392B',borderRadius:30,paddingVertical:14,alignItems:'center',backgroundColor:C.bg}}
+              onPress={()=>{
+                const paidOnline = trackOrd.paymentMethod && trackOrd.paymentMethod !== 'cash';
+                Alert.alert(
+                  'Cancel this booking?',
+                  paidOnline
+                    ? `You'll receive a full refund of ₹${trackOrd.total} to your original payment method within 5–7 days.`
+                    : 'Your booking will be cancelled. No payment was collected for cash bookings.',
+                  [
+                    { text: 'Keep booking', style: 'cancel' },
+                    { text: 'Yes, cancel', style: 'destructive', onPress: async () => {
+                      try {
+                        await firestore().collection('bookings').doc(trackOrd.id).update({
+                          status: 'cancelled',
+                          cancelledBy: 'customer',
+                          cancelReason: 'Cancelled by customer',
+                          cancelledAt: firestore.FieldValue.serverTimestamp(),
+                        });
+                        Alert.alert(
+                          '✅ Booking Cancelled',
+                          paidOnline
+                            ? 'Your booking is cancelled. A full refund has been initiated and will reach you in 5–7 days.'
+                            : 'Your booking has been cancelled.'
+                        );
+                        setScreen('main'); setTab('bookings');
+                      } catch (e) {
+                        Alert.alert('Could not cancel', 'Please check your connection and try again, or call us at +91 7207719922.');
+                      }
+                    }},
+                  ]
+                );
+              }}>
+              <Text style={{color:'#C0392B',fontWeight:'800',fontSize:15}}>Cancel Booking</Text>
             </TouchableOpacity>
           )}
           <View style={{height:32}}/>
@@ -4139,10 +4840,6 @@ export default function App() {
               {user && user.name === 'Customer' && (
                 <Text style={{fontSize:11,color:C.orange,marginTop:2}}>👆 Tap to set your name</Text>
               )}
-              {/* Razorpay debug indicator — small text, only visible when OTA-2025-A is live */}
-              <Text style={{fontSize:9,color:C.muted2,marginTop:2}}>
-                OTA-2025-A · 💳 {payConfig.razorpay_key_id ? `Razorpay ${payConfig.razorpay_mode} (${payConfig.razorpay_key_id.slice(0,10)}...)` : 'Razorpay NOT LOADED'}
-              </Text>
             </TouchableOpacity>
           </View>
           <View style={{flexDirection:'row',gap:10,alignItems:'center'}}>
@@ -4309,7 +5006,7 @@ export default function App() {
         <Text style={{color:C.orange,fontSize:18}}>›</Text>
       </TouchableOpacity>
 
-      {/* ── Change 7: COMING SOON — Chimney, Mattress, Sofa Deep + Notify Me ── */}
+      {/* ── Change 7: COMING SOON — Chimney, Mattress + Notify Me ── */}
       <View style={{marginHorizontal:16,marginBottom:22}}>
         <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center',marginBottom:6}}>
           <DText style={{fontSize:17,fontWeight:'700',color:C.text}}>🔜 Launching Soon in Vizag</DText>
@@ -4322,38 +5019,9 @@ export default function App() {
             {emoji:'🍳',name:'Cooking Service',color:'#E87030',desc:'Home chef at your door',id:'cs_cook'},
             {emoji:'🔧',name:'Appliance Repair',color:'#183880',desc:'AC, fridge, washing machine',id:'cs_repair'},
             {emoji:'🌿',name:'Garden Care',color:'#1E6B3A',desc:'Plant care & gardening',id:'cs_garden'},
-          ].map((item)=>{
-            const [notified,setNotified]=React.useState(false);
-            return(
-              <View key={item.id} style={{width:148,backgroundColor:C.card,borderRadius:20,padding:14,borderWidth:0.5,borderColor:C.border2,...SHADOW.card}}>
-                <View style={{width:52,height:52,borderRadius:16,backgroundColor:`${item.color}18`,alignItems:'center',justifyContent:'center',marginBottom:10,borderWidth:0.5,borderColor:`${item.color}30`}}>
-                  <Text style={{fontSize:28}}>{item.emoji}</Text>
-                </View>
-                <Text style={{fontSize:13,fontWeight:'700',color:C.text,lineHeight:17,marginBottom:4}}>{item.name}</Text>
-                <Text style={{fontSize:10,color:C.muted,lineHeight:14,marginBottom:10}}>{item.desc}</Text>
-                <TouchableOpacity
-                  style={{paddingVertical:7,borderRadius:20,alignItems:'center',
-                    backgroundColor:notified?C.greenBg:`${item.color}15`,
-                    borderWidth:0.5,borderColor:notified?C.greenBd:`${item.color}30`}}
-                  onPress={()=>{
-                    if(notified) return;
-                    setNotified(true);
-                    // Save interest to Firestore
-                    if(!DEMO_MODE && user){
-                      firestore().collection('service_interests').add({
-                        serviceId:item.id, serviceName:item.name,
-                        userId:phone, userPhone:phone,
-                        createdAt:firestore.FieldValue.serverTimestamp(),
-                      }).catch(e=>console.log('service_interest:',e));
-                    }
-                  }}>
-                  <Text style={{fontSize:10,fontWeight:'700',color:notified?C.green:item.color}}>
-                    {notified?'✅ Notified!':'🔔 Notify Me'}
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            );
-          })}
+          ].map((item)=>(
+            <ComingSoonNotifyCard key={item.id} item={item} user={user} phone={phone}/>
+          ))}
         </ScrollView>
       </View>
 
@@ -4365,7 +5033,7 @@ export default function App() {
             <DText style={{fontSize:18,fontWeight:'700',color:'#FFF',marginBottom:4}}>Subscribe & Save 10%</DText>
             <Text style={{fontSize:12,color:'rgba(255,255,255,0.6)',lineHeight:18}}>Daily, weekly or monthly home care plans</Text>
           </View>
-          <TouchableOpacity style={{backgroundColor:C.gold2,paddingHorizontal:14,paddingVertical:10,borderRadius:20,...SHADOW.glow,shadowColor:C.gold}} onPress={()=>Alert.alert('Coming Soon! 🌟','VEGA subscription plans launching next month!')}>
+          <TouchableOpacity style={{backgroundColor:C.gold2,paddingHorizontal:14,paddingVertical:10,borderRadius:20,...SHADOW.glow,shadowColor:C.gold}} onPress={()=>{setTab('home');Alert.alert('Subscribe & Save 10%','Pick any service, then choose the 🔁 Monthly plan at checkout — you save 10% automatically.');}}>
             <Text style={{color:'#FFF',fontWeight:'800',fontSize:13}}>Join ›</Text>
           </TouchableOpacity>
         </View>
@@ -4482,40 +5150,9 @@ export default function App() {
         {/* Coming Soon — VEGA task services (Change 7) */}
         <Text style={{fontSize:13,fontWeight:'700',color:C.muted,marginHorizontal:16,marginTop:8,marginBottom:10,letterSpacing:0.8}}>COMING SOON IN VIZAG</Text>
         {/* Task-based coming soon (Chimney, Mattress, Sofa Deep) */}
-        {COMING_SOON_TASKS.map((task)=>{
-          const [notified,setNotified]=React.useState(false);
-          return(
-            <View key={task.id} style={{flexDirection:'row',alignItems:'center',backgroundColor:C.card,marginHorizontal:16,marginBottom:10,borderRadius:20,padding:14,borderWidth:0.5,borderColor:C.border2,overflow:'hidden'}}>
-              <View style={{position:'absolute',left:0,top:0,bottom:0,width:5,backgroundColor:task.color}}/>
-              <View style={{width:52,height:52,borderRadius:16,backgroundColor:`${task.color}15`,alignItems:'center',justifyContent:'center',marginRight:14,marginLeft:10,borderWidth:0.5,borderColor:`${task.color}30`}}>
-                <Text style={{fontSize:26}}>{task.emoji}</Text>
-              </View>
-              <View style={{flex:1}}>
-                <DText style={{fontSize:14,fontWeight:'700',color:C.text}}>{task.name}</DText>
-                <Text style={{fontSize:12,color:C.muted,marginTop:2}} numberOfLines={1}>{task.desc}</Text>
-              </View>
-              <TouchableOpacity
-                style={{paddingHorizontal:12,paddingVertical:6,borderRadius:16,
-                  backgroundColor:notified?C.greenBg:`${task.color}15`,
-                  borderWidth:0.5,borderColor:notified?C.greenBd:`${task.color}30`}}
-                onPress={()=>{
-                  if(notified) return;
-                  setNotified(true);
-                  if(!DEMO_MODE&&user){
-                    firestore().collection('service_interests').add({
-                      serviceId:task.id, serviceName:task.name,
-                      userId:phone, userPhone:phone,
-                      createdAt:firestore.FieldValue.serverTimestamp(),
-                    }).catch(e=>console.log('service_interest:',e));
-                  }
-                }}>
-                <Text style={{fontSize:11,fontWeight:'700',color:notified?C.green:task.color}}>
-                  {notified?'✅ Notified':'🔔 Notify Me'}
-                </Text>
-              </TouchableOpacity>
-            </View>
-          );
-        })}
+        {COMING_SOON_TASKS.map((task)=>(
+          <ComingSoonNotifyRow key={task.id} task={task} user={user} phone={phone}/>
+        ))}
         {/* Full services coming soon (Sofa, Beauty, Deep, Elder) */}
         {SERVICES.filter(s=>['sofa','beauty','deep','elder'].includes(s.id)).map((svc)=>(
           <View key={svc.id} style={{flexDirection:'row',alignItems:'center',backgroundColor:C.card,marginHorizontal:16,marginBottom:10,borderRadius:20,padding:14,borderWidth:0.5,borderColor:C.border2,overflow:'hidden',opacity:0.65}}>
@@ -4564,79 +5201,13 @@ export default function App() {
       o.status==='completed'||o.status==='cancelled'||(o.scheduledDate&&o.scheduledDate<todayStr&&o.status!=='confirmed')
     );
 
-    const OrderCard = ({o, showVisits=false})=>{
-      // Bug 4+5: child visits use new parentSubscriptionId+isChildVisit (legacy: parentOrderId+isRecurringChild)
-      const childVisits = orders.filter(c =>
-        (c.parentSubscriptionId === o.orderId && c.isChildVisit) ||
-        (c.parentOrderId === o.orderId && c.isRecurringChild)
-      );
-      const [expanded,setExpanded]=React.useState(false);
-      const isSubscription = o.bookingMode === 'subscription';
-      const isMultiSchedule = o.bookingMode === 'scheduled' && (o.totalVisits || 1) > 1;
-      const hasMultipleVisits = isSubscription || isMultiSchedule;
-      return(
-        <TouchableOpacity style={{backgroundColor:C.card,borderRadius:22,marginBottom:10,overflow:'hidden',...SHADOW.soft}}
-          onPress={()=>{setTrackOrd(o);setScreen('track');}}>
-          <View style={{height:4,backgroundColor:isSubscription?C.teal:isMultiSchedule?C.gold:o.status==='completed'?C.green:C.orange}}/>
-          <View style={{padding:14}}>
-            <View style={{flexDirection:'row',justifyContent:'space-between',marginBottom:8}}>
-              <View style={{flexDirection:'row',alignItems:'center',gap:6}}>
-                <Text style={{color:C.orange,fontWeight:'700',fontSize:12}}>#{o.orderId}</Text>
-                {isSubscription && <View style={{backgroundColor:C.tealBg,paddingHorizontal:7,paddingVertical:2,borderRadius:8,borderWidth:0.5,borderColor:C.tealBd}}><Text style={{color:C.teal,fontSize:9,fontWeight:'700'}}>🔁 Subscription</Text></View>}
-                {isMultiSchedule && <View style={{backgroundColor:C.goldBg,paddingHorizontal:7,paddingVertical:2,borderRadius:8,borderWidth:0.5,borderColor:C.goldBd}}><Text style={{color:C.gold,fontSize:9,fontWeight:'700'}}>📅 {o.totalVisits} visits</Text></View>}
-              </View>
-              <View style={{flexDirection:'row',gap:6,alignItems:'center'}}>
-                {o.rated&&<Text style={{fontSize:10}}>{'⭐'.repeat(Math.min(o.rating||0,5))}</Text>}
-                <Badge label={o.status||'confirmed'} color={o.status==='completed'?C.green:o.status==='cancelled'?C.red:C.orange}/>
-              </View>
-            </View>
-            {o.items?.slice(0,2).map((item,i)=>(
-              <View key={i} style={{flexDirection:'row',alignItems:'center',gap:10,marginBottom:6}}>
-                <View style={{width:38,height:38,borderRadius:12,backgroundColor:C.orangeSolid,alignItems:'center',justifyContent:'center'}}><Text style={{fontSize:18}}>{item.icon}</Text></View>
-                <View style={{flex:1}}><Text style={{fontWeight:'600',color:C.text,fontSize:13}} numberOfLines={1}>{item.name}</Text></View>
-                <DText style={{color:C.orange,fontWeight:'700',fontSize:13}}>₹{item.price}</DText>
-              </View>
-            ))}
-            <View style={{height:0.5,backgroundColor:C.border,marginVertical:8}}/>
-            <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center'}}>
-              <Text style={{color:C.muted,fontSize:11,flex:1}} numberOfLines={1}>📅 {o.slot?.split('·')[0]||o.slot}</Text>
-              <View style={{flexDirection:'row',gap:6,alignItems:'center'}}>
-                <DText style={{color:C.orange,fontWeight:'700',fontSize:14}}>₹{o.total}</DText>
-                {!o.rated&&o.status==='completed'&&(
-                  <TouchableOpacity style={{backgroundColor:C.orangeBg,paddingHorizontal:10,paddingVertical:4,borderRadius:16,borderWidth:0.5,borderColor:C.orangeBd}}
-                    onPress={(e)=>{e.stopPropagation?.();setRatingOrd(o);setUserRating(0);setRatingNote('');setScreen('rate');}}>
-                    <Text style={{color:C.orange,fontSize:11,fontWeight:'700'}}>Rate ⭐</Text>
-                  </TouchableOpacity>
-                )}
-                {o.status==='completed'&&(
-                  <TouchableOpacity style={{backgroundColor:C.orangeSolid,paddingHorizontal:10,paddingVertical:4,borderRadius:16,borderWidth:0.5,borderColor:C.orangeBd}}
-                    onPress={(e)=>{e.stopPropagation?.();setTab('services');}}>
-                    <Text style={{color:C.orange,fontSize:11,fontWeight:'700'}}>🔄 Again</Text>
-                  </TouchableOpacity>
-                )}
-              </View>
-            </View>
-            {/* Bug 4+5: Expandable upcoming visits (subscription or multi-date scheduled) */}
-            {hasMultipleVisits && childVisits.length > 0 && (
-              <TouchableOpacity style={{marginTop:8,backgroundColor:isSubscription?C.tealBg:C.goldSolid,borderRadius:10,padding:10,borderWidth:0.5,borderColor:isSubscription?C.tealBd:C.goldBd,flexDirection:'row',alignItems:'center',justifyContent:'space-between'}}
-                onPress={(e)=>{e.stopPropagation?.();setExpanded(ex=>!ex);}}>
-                <Text style={{color:isSubscription?C.teal:C.gold,fontWeight:'700',fontSize:11}}>📆 {childVisits.length} upcoming visits</Text>
-                <Text style={{color:isSubscription?C.teal:C.gold,fontSize:14}}>{expanded?'▲':'▼'}</Text>
-              </TouchableOpacity>
-            )}
-            {expanded && childVisits.map((cv,ci)=>(
-              <View key={ci} style={{backgroundColor:isSubscription?C.tealBg:C.goldSolid,marginTop:4,borderRadius:10,padding:10,flexDirection:'row',alignItems:'center',gap:8,borderWidth:0.5,borderColor:isSubscription?C.tealBd:C.goldBd}}>
-                <View style={{width:22,height:22,borderRadius:11,backgroundColor:isSubscription?C.teal:C.gold,alignItems:'center',justifyContent:'center'}}>
-                  <Text style={{color:'#FFF',fontSize:10,fontWeight:'800'}}>{cv.visitNumber || (ci+2)}</Text>
-                </View>
-                <Text style={{fontSize:11,color:C.text,flex:1}} numberOfLines={1}>{cv.scheduledDate} {cv.scheduledTime?`at ${cv.scheduledTime}`:''}</Text>
-                <Badge label={cv.status||'scheduled'} color={isSubscription?C.teal:C.gold}/>
-              </View>
-            ))}
-          </View>
-        </TouchableOpacity>
-      );
-    };
+    // OrderCard is now module-scope (B1 fix — no more remount/expand-reset). Thin helper wires per-card handlers:
+    const renderOrderCard = (o) => (
+      <OrderCard key={o.orderId} o={o} orders={orders}
+        onOpen={()=>{setTrackOrd(o);setScreen('track');}}
+        onRate={()=>{setRatingOrd(o);setUserRating(0);setRatingNote('');setScreen('rate');}}
+        onAgain={()=>setTab('services')}/>
+    );
 
     const SectionHeader = ({title,count,color=C.orange})=>(
       <View style={{flexDirection:'row',alignItems:'center',gap:8,marginBottom:10,marginTop:4}}>
@@ -4666,24 +5237,24 @@ export default function App() {
               {todayOrders.length>0&&(
                 <>
                   <SectionHeader title="TODAY" count={todayOrders.length} color={C.green}/>
-                  {todayOrders.map(o=><OrderCard key={o.orderId} o={o}/>)}
+                  {todayOrders.map(o=>renderOrderCard(o))}
                 </>
               )}
               {upcomingOrders.length>0&&(
                 <>
                   <SectionHeader title="UPCOMING" count={upcomingOrders.length} color={C.orange}/>
-                  {upcomingOrders.map(o=><OrderCard key={o.orderId} o={o} showVisits/>)}
+                  {upcomingOrders.map(o=>renderOrderCard(o))}
                 </>
               )}
               {pastOrders.length>0&&(
                 <>
                   <SectionHeader title="PAST" count={pastOrders.length} color={C.muted}/>
-                  {pastOrders.map(o=><OrderCard key={o.orderId} o={o}/>)}
+                  {pastOrders.map(o=>renderOrderCard(o))}
                 </>
               )}
               {/* If none categorized, show all */}
               {todayOrders.length===0&&upcomingOrders.length===0&&pastOrders.length===0&&(
-                parentOrders.map(o=><OrderCard key={o.orderId} o={o}/>)
+                parentOrders.map(o=>renderOrderCard(o))
               )}
               <View style={{height:40}}/>
             </>
@@ -4693,42 +5264,142 @@ export default function App() {
     );
   };
 
-  const OffersTab=()=>(
-    <SafeAreaView style={{flex:1,backgroundColor:C.bg}}>
-      <View style={[S.topBar,{paddingTop:52}]}>
-        <View style={{width:36}}/><DText style={[S.topTitle,{fontSize:20}]}>Offers & Promos</DText><View style={{width:36}}/>
-      </View>
-      <ScrollView style={{flex:1,padding:16}}>
-        {[
-          {code:'VEGA50',  title:'50% OFF — First Booking',  desc:'Valid on your very first VEGA booking.',  color:C.orange, emoji:'🎉'},
-          {code:'FIRST20', title:'New User 20% OFF',          desc:'20% off for new users, valid once.',       color:C.teal,   emoji:'👋'},
-          {code:'FLAT100', title:'Flat ₹100 OFF',             desc:'₹100 flat discount on orders above ₹399.',color:C.blue,   emoji:'💰'},
-          {code:'VIZAG20', title:'Vizag Special 20% OFF',     desc:'Exclusive for Visakhapatnam customers.',   color:C.purple, emoji:'🌊'},
-          {code:'VEGA2025',title:'Welcome Offer 20% OFF',     desc:'Launch offer. Use before it expires!',     color:C.rose,   emoji:'🪷'},
-        ].map((offer,i)=>(
-          <View key={i} style={{backgroundColor:C.card,borderRadius:22,marginBottom:12,overflow:'hidden',borderWidth:0.5,borderColor:C.border2,...SHADOW.soft,shadowColor:offer.color+'60'}}>
-            <View style={{height:4,backgroundColor:offer.color}}/>
-            <View style={{padding:18}}>
-              <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center',marginBottom:12}}>
-                <View style={{flexDirection:'row',alignItems:'center',gap:10}}>
-                  <Text style={{fontSize:28}}>{offer.emoji}</Text>
-                  {/* ✅ Soft translucent promo badge */}
-                  <View style={{backgroundColor:`${offer.color}18`,paddingHorizontal:12,paddingVertical:6,borderRadius:12,borderWidth:0.5,borderColor:`${offer.color}35`}}>
-                    <Text style={{color:offer.color,fontWeight:'800',fontSize:14,letterSpacing:1}}>{offer.code}</Text>
-                  </View>
-                </View>
-                <TouchableOpacity style={{paddingHorizontal:16,paddingVertical:8,borderRadius:20,borderWidth:1.5,borderColor:offer.color,...SHADOW.card,shadowColor:offer.color}} onPress={()=>{setPromoCode(offer.code);setAppliedPromo(PROMOS[offer.code]);Alert.alert('Applied! 🎉',PROMOS[offer.code]?.label||offer.title);}}>
-                  <Text style={{color:offer.color,fontWeight:'800',fontSize:13}}>Apply</Text>
-                </TouchableOpacity>
-              </View>
-              <DText style={{fontWeight:'700',color:C.text,fontSize:16,marginBottom:4}}>{offer.title}</DText>
-              <Text style={{color:C.muted,fontSize:13}}>{offer.desc}</Text>
+  // ═══════════════════════════════════════════════════════════════════
+  // OffersTab — Snabbit/Pronto-style real-time eligibility cards.
+  // Every card shows: Eligible (with live savings) OR Locked (with reason).
+  // Apply button funnels through applyPromo() so all rules run.
+  // Eligible promos sorted to the TOP by best savings.
+  // ═══════════════════════════════════════════════════════════════════
+  const OffersTab = () => {
+    const META = {
+      WELCOME50:  { color: '#C8541A', emoji: '🎉', tagline: 'New customer special' },
+      VEGA50:     { color: '#C8541A', emoji: '🎉', tagline: 'New customer special' },
+      COMEBACK30: { color: '#0E5848', emoji: '🔁', tagline: 'Welcome back offer' },
+      LOYAL15:    { color: '#9A6B10', emoji: '⭐', tagline: 'Loyalty reward' },
+      DAILY10:    { color: '#3E4FB7', emoji: '⏰', tagline: 'Daily one-tap' },
+      VIZAG20:    { color: '#A04848', emoji: '🪷', tagline: 'Vizag launch special' },
+    };
+    const ord = (n) => n === 0 ? '1st' : n === 1 ? '2nd' : n === 2 ? '3rd' : `${n+1}th`;
+    const valid = (orders || []).filter(o => !['cancelled','failed','rejected'].includes(o.status));
+    const orderCount = valid.length;
+
+    const items = Object.entries(PROMOS).map(([code, promo]) => ({
+      code, promo, meta: META[code] || { color: C.orange, emoji: '🎁', tagline: 'Special offer' },
+      status: computePromoStatus(code),
+    }));
+    items.sort((a, b) => {
+      if (a.status.eligible !== b.status.eligible) return a.status.eligible ? -1 : 1;
+      return (b.status.savings || 0) - (a.status.savings || 0);
+    });
+    const firstEligibleIdx = items.findIndex(i => i.status.eligible);
+
+    return (
+      <SafeAreaView style={{flex:1,backgroundColor:C.bg}}>
+        <View style={[S.topBar,{paddingTop:52}]}>
+          <View style={{width:36}}/>
+          <DText style={[S.topTitle,{fontSize:20}]}>Offers & Promos</DText>
+          <View style={{width:36}}/>
+        </View>
+        <ScrollView style={{flex:1,padding:16}}>
+
+          {/* Your eligibility snapshot */}
+          <View style={{backgroundColor:C.card,borderRadius:16,padding:14,marginBottom:14,borderWidth:0.5,borderColor:C.border2,flexDirection:'row',alignItems:'center',gap:12}}>
+            <Text style={{fontSize:24}}>👤</Text>
+            <View style={{flex:1}}>
+              <Text style={{fontWeight:'700',color:C.text,fontSize:14}}>You're on booking #{orderCount + 1}</Text>
+              <Text style={{color:C.muted,fontSize:12}}>{orderCount === 0 ? 'Your first booking unlocks the biggest offer 🎉' : `You've completed ${orderCount} ${orderCount === 1 ? 'booking' : 'bookings'} so far`}</Text>
             </View>
           </View>
-        ))}
-      </ScrollView>
-    </SafeAreaView>
-  );
+
+          {items.map(({ code, promo, meta, status }, idx) => {
+            const isBest = idx === firstEligibleIdx && status.eligible;
+            const cardOpacity = status.eligible ? 1 : 0.62;
+            return (
+              <View key={code} style={{
+                backgroundColor: C.card,
+                borderRadius: 22,
+                marginBottom: 12,
+                overflow: 'hidden',
+                borderWidth: isBest ? 2 : 0.5,
+                borderColor: isBest ? meta.color : C.border2,
+                ...SHADOW.soft,
+                shadowColor: status.eligible ? meta.color + '60' : 'transparent',
+              }}>
+                {isBest && (
+                  <View style={{backgroundColor: meta.color, paddingVertical:7, paddingHorizontal:14, flexDirection:'row',alignItems:'center',gap:6}}>
+                    <Text style={{fontSize:11}}>⭐</Text>
+                    <Text style={{color:'#FFF',fontWeight:'800',fontSize:11,letterSpacing:1.5}}>BEST DEAL FOR YOU</Text>
+                  </View>
+                )}
+                {!isBest && <View style={{height:4,backgroundColor: status.eligible ? meta.color : C.border}}/>}
+                <View style={{padding:18, opacity: cardOpacity}}>
+                  <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center',marginBottom:10}}>
+                    <View style={{flexDirection:'row',alignItems:'center',gap:10,flex:1}}>
+                      <Text style={{fontSize:26}}>{meta.emoji}</Text>
+                      <View style={{backgroundColor: meta.color + '18',paddingHorizontal:12,paddingVertical:6,borderRadius:12,borderWidth:0.5,borderColor: meta.color + '35'}}>
+                        <Text style={{color: meta.color,fontWeight:'800',fontSize:13,letterSpacing:1}}>{code}</Text>
+                      </View>
+                    </View>
+                    {status.eligible ? (
+                      <TouchableOpacity
+                        style={{paddingHorizontal:18,paddingVertical:10,borderRadius:22,backgroundColor: meta.color,...SHADOW.glow,shadowColor: meta.color}}
+                        onPress={() => { setPromoCode(code); setTimeout(applyPromo, 50); }}
+                      >
+                        <Text style={{color:'#FFF',fontWeight:'800',fontSize:13}}>Apply →</Text>
+                      </TouchableOpacity>
+                    ) : (
+                      <View style={{paddingHorizontal:14,paddingVertical:9,borderRadius:20,backgroundColor: C.bg,borderWidth:0.5,borderColor: C.border2,flexDirection:'row',alignItems:'center',gap:5}}>
+                        <Text style={{fontSize:10}}>🔒</Text>
+                        <Text style={{color: C.muted2,fontWeight:'700',fontSize:11}}>Locked</Text>
+                      </View>
+                    )}
+                  </View>
+
+                  <DText style={{fontWeight:'800',color: C.text,fontSize:20,marginBottom:2}}>
+                    {promo.type === 'pct' ? `${promo.val}% OFF` : `₹${promo.val} OFF`}
+                    {promo.maxCap && promo.type === 'pct' && (
+                      <Text style={{fontSize:13,fontWeight:'500',color: C.muted}}>  ·  max ₹{promo.maxCap}</Text>
+                    )}
+                  </DText>
+                  <Text style={{color: C.muted,fontSize:12,marginBottom: 4}}>{meta.tagline}</Text>
+
+                  {/* Eligibility status row */}
+                  {status.eligible && status.savings > 0 && (
+                    <View style={{flexDirection:'row',alignItems:'center',gap:8,marginTop:10,backgroundColor:'#E2F5EA',padding:11,borderRadius:12,borderWidth:0.5,borderColor:'#A8D4B8'}}>
+                      <Text style={{fontSize:15}}>💰</Text>
+                      <Text style={{color:'#1E6B3A',fontWeight:'700',fontSize:13,flex:1}}>You save ₹{status.savings} on your current cart</Text>
+                    </View>
+                  )}
+                  {status.eligible && status.savings === 0 && status.needsMinOrder && (
+                    <View style={{flexDirection:'row',alignItems:'center',gap:8,marginTop:10,backgroundColor:'#FBF1E0',padding:11,borderRadius:12,borderWidth:0.5,borderColor:'#E8C68C'}}>
+                      <Text style={{fontSize:15}}>💡</Text>
+                      <Text style={{color:'#7B5A1A',fontWeight:'600',fontSize:13,flex:1}}>Add services to reach ₹{status.needsMinOrder} min order to use this</Text>
+                    </View>
+                  )}
+                  {!status.eligible && status.lockReason && (
+                    <View style={{flexDirection:'row',alignItems:'center',gap:8,marginTop:10}}>
+                      <Text style={{fontSize:13}}>🔒</Text>
+                      <Text style={{color: C.muted2,fontSize:12,flex:1,fontStyle:'italic'}}>{status.lockReason}</Text>
+                    </View>
+                  )}
+                </View>
+              </View>
+            );
+          })}
+
+          {/* Rules footer — Snabbit-style "How offers work" */}
+          <View style={{padding:18,backgroundColor: C.card,borderRadius:22,marginTop:8,marginBottom:30,borderWidth:0.5,borderColor: C.border2}}>
+            <Text style={{fontWeight:'800',color: C.text,fontSize:14,marginBottom:8}}>💡 How VEGA promos work</Text>
+            <Text style={{color: C.muted,fontSize:12,lineHeight:19,marginBottom:5}}>• Each code can be used a limited number of times per user.</Text>
+            <Text style={{color: C.muted,fontSize:12,lineHeight:19,marginBottom:5}}>• Percentage discounts are capped — never more than the listed maximum.</Text>
+            <Text style={{color: C.muted,fontSize:12,lineHeight:19,marginBottom:5}}>• Promos don't stack with the monthly subscription discount.</Text>
+            <Text style={{color: C.muted,fontSize:12,lineHeight:19,marginBottom:5}}>• VEGA Wallet credits DO apply on top of any promo.</Text>
+            <Text style={{color: C.muted,fontSize:12,lineHeight:19}}>• Minimum order ₹99.</Text>
+          </View>
+        </ScrollView>
+      </SafeAreaView>
+    );
+  };
 
   const ProfileTab=()=>(
     <SafeAreaView style={{flex:1,backgroundColor:C.bg}}>
@@ -4769,10 +5440,31 @@ export default function App() {
                 <Text style={{color:C.muted,fontSize:13,marginBottom:12,lineHeight:19}}>Share your code. Both you and friend each get ₹200!</Text>
                 <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center',backgroundColor:C.orangeBg,borderRadius:14,padding:14,borderWidth:0.5,borderColor:C.orangeBd}}>
                   <DText style={{color:C.orange,fontSize:20,fontWeight:'700',letterSpacing:4}}>{user.code}</DText>
-                  <TouchableOpacity style={{backgroundColor:C.orange,paddingHorizontal:16,paddingVertical:10,borderRadius:20,...SHADOW.glow}} onPress={()=>Alert.alert('Share VEGA! 🪷',`Your code: ${user.code}`)}>
+                  <TouchableOpacity style={{backgroundColor:C.orange,paddingHorizontal:16,paddingVertical:10,borderRadius:20,...SHADOW.glow}} onPress={async()=>{
+                    try {
+                      await Share.share({
+                        message:
+                          `🪷 Try VEGA Home Services!\n\n`+
+                          `Home cleaning, bathroom cleaning, car washing — done by trained pros in Visakhapatnam.\n\n`+
+                          `Use my referral code: ${user.code}\n`+
+                          `You get ₹200, I get ₹200 — both win!\n\n`+
+                          `Install: https://play.google.com/store/apps/details?id=com.vegavizag.app`,
+                        title: 'Try VEGA Home Services',
+                      });
+                    } catch (e) { /* user cancelled — that's fine */ }
+                  }}>
                     <Text style={{color:'#FFF',fontWeight:'700',fontSize:13}}>Share</Text>
                   </TouchableOpacity>
                 </View>
+                {/* Allow existing users (who skipped the first-time modal) to enter a friend's code */}
+                {!user.referralApplied && (
+                  <TouchableOpacity
+                    style={{marginTop:12,padding:12,borderWidth:1,borderColor:C.orangeBd,borderRadius:14,alignItems:'center',backgroundColor:'#FFF'}}
+                    onPress={()=>{ setProfileRefCode(''); setShowReferralPrompt(true); }}
+                  >
+                    <Text style={{color:C.orange,fontWeight:'700',fontSize:13}}>Have a friend's code? Enter it here →</Text>
+                  </TouchableOpacity>
+                )}
               </Card>
             </>
           )}
@@ -4784,7 +5476,7 @@ export default function App() {
             ['💳','Payment Methods',()=>Alert.alert('Coming Soon')],
             ['🔔','Notifications',()=>Alert.alert('Notifications 🔔','VEGA50 expires today!')],
             ['⭐','Rate VEGA App',()=>Alert.alert('Thank You! 🙏')],
-            ['🆘','Help & Support',()=>Alert.alert('VEGA Support','📞 +91 9441270570\n📧 connect@vegaservice.in\n⏰ 8AM–10PM')],
+            ['🆘','Help & Support',()=>Alert.alert('VEGA Support','📞 +91 7207719922\n📧 connect@vegaservice.in\n⏰ 8AM–10PM')],
           ].map(([ic,lb,ac],i)=>(
             <TouchableOpacity key={i} style={{flexDirection:'row',alignItems:'center',backgroundColor:C.card,borderRadius:18,padding:14,marginBottom:8,borderWidth:0.5,borderColor:C.border2,...SHADOW.card}} onPress={ac}>
               <View style={{width:42,height:42,borderRadius:13,backgroundColor:C.orangeBg,alignItems:'center',justifyContent:'center',marginRight:14,borderWidth:0.5,borderColor:C.orangeBd}}><Text style={{fontSize:20}}>{ic}</Text></View>
@@ -4849,6 +5541,56 @@ export default function App() {
           {!user&&<View style={{height:40}}/>}
         </View>
       </ScrollView>
+
+      {/* Profile-side "Enter friend's referral code" modal — for users who skipped the first-time signup prompt */}
+      <Modal visible={showReferralPrompt} transparent animationType="fade" onRequestClose={()=>setShowReferralPrompt(false)}>
+        <View style={{flex:1,backgroundColor:'rgba(0,0,0,0.6)',justifyContent:'center',padding:24}}>
+          <View style={{backgroundColor:'#FFF',borderRadius:20,padding:24}}>
+            <Text style={{fontWeight:'700',fontSize:18,color:C.text,marginBottom:6}}>🎁 Enter friend's code</Text>
+            <Text style={{color:C.muted,fontSize:13,marginBottom:14}}>Type the referral code shared with you. Both you and your friend get ₹200 in VEGA wallet.</Text>
+            <TextInput
+              style={{borderWidth:1,borderColor:C.border,borderRadius:14,padding:14,fontSize:18,color:C.text,marginBottom:14,letterSpacing:4,fontWeight:'700',textAlign:'center',textTransform:'uppercase'}}
+              placeholder="VG12345"
+              value={profileRefCode}
+              onChangeText={t=>setProfileRefCode(t.toUpperCase().replace(/[^A-Z0-9]/g,''))}
+              autoFocus
+              autoCapitalize="characters"
+              maxLength={10}
+            />
+            <View style={{flexDirection:'row',gap:10}}>
+              <TouchableOpacity style={{flex:1,padding:14,borderRadius:14,borderWidth:1,borderColor:C.border,alignItems:'center'}} onPress={()=>{setShowReferralPrompt(false);setProfileRefCode('');}}>
+                <Text style={{color:C.muted,fontWeight:'600'}}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={{flex:1,padding:14,borderRadius:14,backgroundColor:C.orange,alignItems:'center'}} onPress={async()=>{
+                const code = profileRefCode.trim().toUpperCase();
+                if (!code || code.length < 4) { Alert.alert('Code too short','Please enter the full referral code.'); return; }
+                const r = await applyReferralCode(phone, code);
+                if (r.ok) {
+                  const fresh = await getUser(phone);
+                  if (fresh) {
+                    setWallet(fresh.walletBalance || 0);
+                    setUser(u => u ? { ...u, walletBalance: fresh.walletBalance || 0, referralApplied: true } : u);
+                  }
+                  setShowReferralPrompt(false);
+                  setProfileRefCode('');
+                  Alert.alert('🎉 Referral applied!', `You and your friend each got ₹${r.bonus} in VEGA wallet.`);
+                } else {
+                  const errMap = {
+                    invalid_code: 'That code does not match any VEGA user.',
+                    self_referral: 'You cannot use your own referral code.',
+                    already_applied: 'You have already used a referral code.',
+                    too_short: 'Referral code looks too short.',
+                    server_error: 'Could not apply code right now. Try later.',
+                  };
+                  Alert.alert('Referral not applied', errMap[r.error] || 'Code could not be applied.');
+                }
+              }}>
+                <Text style={{color:'#FFF',fontWeight:'700'}}>Apply</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 
@@ -4904,7 +5646,7 @@ export default function App() {
   );
 
   const SearchModal=()=>(
-    <Modal visible={showSearch} animationType="slide">
+    <Modal visible={showSearch} animationType="slide" onRequestClose={()=>{setShowSearch(false);setSearch('');}}>
       <SafeAreaView style={{flex:1,backgroundColor:C.bg}}>
         <View style={{flexDirection:'row',alignItems:'center',padding:16,paddingTop:16,gap:12,backgroundColor:C.white,borderBottomWidth:0.5,borderBottomColor:C.border2,...SHADOW.card}}>
           <TouchableOpacity onPress={()=>{setShowSearch(false);setSearch('');}} style={{width:38,height:38,borderRadius:19,backgroundColor:C.light,alignItems:'center',justifyContent:'center'}}><Text style={{fontSize:18,color:C.text}}>←</Text></TouchableOpacity>
@@ -4923,10 +5665,10 @@ export default function App() {
               ))}
             </>
           ):(
-            SERVICES.filter(s=>s.shortName.toLowerCase().includes(search.toLowerCase())).length===0?(
+            SERVICES.filter(s=>['home','bathroom','kitchen','car'].includes(s.id)&&s.shortName.toLowerCase().includes(search.toLowerCase())).length===0?(
               <View style={{alignItems:'center',paddingTop:60}}><Text style={{fontSize:40,marginBottom:12}}>🔍</Text><Text style={{color:C.muted,fontSize:15}}>No results for "{search}"</Text></View>
             ):(
-              SERVICES.filter(s=>s.shortName.toLowerCase().includes(search.toLowerCase())).map((svc,i)=>(
+              SERVICES.filter(s=>['home','bathroom','kitchen','car'].includes(s.id)&&s.shortName.toLowerCase().includes(search.toLowerCase())).map((svc,i)=>(
                 <TouchableOpacity key={i} style={{flexDirection:'row',alignItems:'center',gap:14,paddingVertical:13,borderBottomWidth:0.5,borderBottomColor:C.border2}} onPress={()=>{openService(svc);setShowSearch(false);setSearch('');}}>
                   <View style={{width:52,height:52,borderRadius:16,backgroundColor:svc.iconBg,alignItems:'center',justifyContent:'center',borderBottomWidth:3,borderBottomColor:svc.gradient[1],...SHADOW.card,shadowColor:svc.gradient[1]}}>
                     {svcImgSource(svc.id)
@@ -4961,14 +5703,14 @@ export default function App() {
   return(
     <View style={{flex:1,backgroundColor:C.bg}}>
       <StatusBar barStyle="dark-content" backgroundColor={C.white}/>
-      <SearchModal/>
+      {SearchModal()}
       <View style={{flex:1}}>
-        {tab==='home'     &&<HomeTab/>}
-        {tab==='services' &&<ServicesTab/>}
-        {tab==='cart'     &&<CartTab/>}
-        {tab==='bookings' &&<BookingsTab/>}
-        {tab==='offers'   &&<OffersTab/>}
-        {tab==='profile'  &&<ProfileTab/>}
+        {tab==='home'     && HomeTab()}
+        {tab==='services' && ServicesTab()}
+        {tab==='cart'     &&CartTab()}
+        {tab==='bookings' && BookingsTab()}
+        {tab==='offers'   &&OffersTab()}
+        {tab==='profile'  &&ProfileTab()}
       </View>
 
       {/* Floating cart bar — dark premium */}

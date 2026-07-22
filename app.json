@@ -17,7 +17,7 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.vegavizag.app",
-      "buildNumber": "5",
+      "buildNumber": "6",
       "appleTeamId": "73RYNYV3JU",
       "googleServicesFile": "./GoogleService-Info.plist",
       "infoPlist": {

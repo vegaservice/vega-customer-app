@@ -6,3 +6,5 @@ package-lock.json
 *.log
 asc-api-key.p8
 google-play-key.json
+*.p8
+dist/

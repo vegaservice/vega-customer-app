@@ -246,7 +246,7 @@ async function seedAppConfig() {
     maxWalletUse: 200,
     referralBonus: 200,
     ratingBonus: 50,
-    supportPhone: '9441270570',
+    supportPhone: '7207719922',
     supportEmail: 'connect@vegavizag.in',
     serviceCities: ['Visakhapatnam'],
     serviceAreas: [

@@ -1,0 +1,172 @@
+// VEGA HOME SERVICES — HARDENED Firestore Security Rules (DRAFT)
+// ═══════════════════════════════════════════════════════════════
+// Phase A remediation. NOT YET DEPLOYED — must pass emulator test suite first.
+// Replaces the fully-permissive launch rules.
+//
+// DESIGN PRINCIPLES
+//  1. Ownership: a customer reads/writes only their own user + bookings.
+//  2. Roles via CUSTOM CLAIMS (request.auth.token.role) set by a Cloud Function
+//     on login/onboarding — robust + avoids phone-format string juggling in rules.
+//     Roles: 'admin' | 'hub' | 'worker' | (none = customer).
+//  3. Booking STATUS is server-authoritative: clients may NOT change `status`
+//     (status transitions go through requestStatusChange CF, which uses the
+//      Admin SDK and bypasses these rules). Customer may set ONLY 'cancelled'.
+//  4. Config/catalog read-only to clients; writes via Admin SDK only.
+//
+// DEPENDENCY: a CF (`setUserRoleClaims`) must set custom claims:
+//   admin → token.role=='admin'; hub manager → 'hub'; worker → 'worker'.
+//   Until claims are live, fall back helpers check the admins/workers docs.
+// ═══════════════════════════════════════════════════════════════
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── Helpers ────────────────────────────────────────────
+    function signedIn() { return request.auth != null; }
+    function authPhone() { return request.auth.token.phone_number; } // "+91XXXXXXXXXX"
+    // bare 10-digit doc id → full +91 form, to match the auth token
+    function ownsPhone(docId) { return signedIn() && authPhone() == '+91' + docId; }
+
+    function role() { return signedIn() ? request.auth.token.role : null; }
+    function isAdmin() { return role() == 'admin'; }
+    function isHub()   { return role() == 'hub'; }
+    function isWorker(){ return role() == 'worker'; }
+    function isOps()   { return isAdmin() || isHub(); }
+
+    // a booking update that does NOT modify the status field
+    function statusUnchanged() {
+      return request.resource.data.status == resource.data.status;
+    }
+    // worker assigned to this booking (canonical field, legacy fallback)
+    function assignedWorkerMatches() {
+      return signedIn() && (
+        request.auth.uid == resource.data.assignedWorkerId ||
+        authPhone() == '+91' + string(resource.data.assignedWorkerPhone)
+      );
+    }
+    // customer who owns this booking
+    function ownsBooking() {
+      return signedIn() && authPhone() == '+91' + string(resource.data.customerPhone);
+    }
+
+    // ── USERS ──────────────────────────────────────────────
+    match /users/{userId} {
+      allow read:   if ownsPhone(userId) || isOps();
+      allow create: if ownsPhone(userId);
+      allow update: if ownsPhone(userId) || isOps();
+      allow delete: if false; // account deletion via Cloud Function (Admin SDK)
+
+      match /bookings/{bookingId} { allow read, write: if ownsPhone(userId) || isOps(); }
+      match /addresses/{addressId} { allow read, write: if ownsPhone(userId); }
+    }
+
+    // ── BOOKINGS (top-level) ───────────────────────────────
+    match /bookings/{bookingId} {
+      allow read:   if ownsBooking() || assignedWorkerMatches() || isOps();
+      // Customer creates own booking (must stamp their own phone)
+      allow create: if signedIn()
+                    && request.resource.data.customerPhone is string
+                    && authPhone() == '+91' + request.resource.data.customerPhone;
+      // Clients may update ONLY non-status fields they own,
+      // EXCEPT a customer may cancel (set status=='cancelled').
+      allow update: if (ownsBooking() && (statusUnchanged()
+                          || request.resource.data.status == 'cancelled'))
+                    || (isOps() && statusUnchanged());
+      // ALL forward status transitions go through requestStatusChange CF (Admin SDK).
+      allow delete: if false;
+    }
+
+    // ── WORKERS ────────────────────────────────────────────
+    match /workers/{workerId} {
+      allow read:   if isOps() || (isWorker() && ownsPhone(workerId));
+      allow create: if isOps();
+      // Worker may toggle own availability/fcmToken; ops may manage.
+      allow update: if isOps() || (isWorker() && ownsPhone(workerId));
+      allow delete: if isAdmin();
+      match /location_trail/{trailId} {
+        allow read:  if isOps();
+        allow write: if isWorker() && ownsPhone(workerId);
+      }
+    }
+
+    // ── PROFESSIONALS (legacy mirror — read-only, retire in DC-3) ─
+    match /professionals/{proId} {
+      allow read: if isOps();
+      allow write: if false;
+    }
+
+    // ── ADMINS (no self-promotion — Admin SDK / existing admin only) ─
+    match /admins/{adminId} {
+      allow read:   if isAdmin();
+      allow create: if false;   // 🔒 was open → self-promote vector (S-3 fix)
+      allow update: if false;   // managed via Admin SDK / console
+      allow delete: if false;
+    }
+
+    // ── WALLET / LEDGERS (immutable, owner-read) ───────────
+    match /wallet_transactions/{txnId} {
+      allow read:   if isOps() || (signedIn() && authPhone() == '+91' + string(resource.data.phone));
+      allow create: if signedIn();
+      allow update, delete: if false; // immutable
+    }
+    match /refunds/{refundId} {        // NEW (Phase B)
+      allow read:   if isOps() || ownsBooking();
+      allow write:  if false;          // server-only (processRefund CF)
+    }
+
+    // ── REFERRALS ──────────────────────────────────────────
+    match /referrals/{referralId} {
+      allow read:   if isOps() || signedIn();
+      allow create: if signedIn();
+      allow update: if isOps();
+      allow delete: if false;
+    }
+
+    // ── APP CONFIG / SERVICES / AREAS (read-only to clients) ─
+    match /app_config/{doc} { allow read: if true;  allow write: if false; }
+    match /services/{svcId} { allow read: if true;  allow write: if false; } // NEW catalog (M-3)
+    match /areas/{areaId}   { allow read: if signedIn(); allow write: if false; }
+
+    // ── FCM TOKENS ─────────────────────────────────────────
+    match /fcm_tokens/{tokenId} { allow read, write: if signedIn(); }
+
+    // ── COMPLAINTS ─────────────────────────────────────────
+    match /complaints/{complaintId} {
+      allow read:   if isOps() || ownsBooking();
+      allow create: if signedIn();
+      allow update: if isOps();
+      allow delete: if false;
+    }
+
+    // ── BUG REPORTS / AREA REQUESTS (auth required now — S-4 fix) ─
+    match /bug_reports/{reportId} {
+      allow create: if signedIn();          // was: if true (spam vector)
+      allow read:   if isOps();
+      allow update: if isOps();
+      allow delete: if false;
+    }
+    match /area_requests/{requestId} {
+      allow create: if signedIn();          // was: if true
+      allow read:   if isOps();
+      allow update: if isOps();
+      allow delete: if false;
+    }
+
+    // ── DELETED ACCOUNTS (server-written; client reads own) ─
+    match /deleted_accounts/{phone} {
+      allow read:  if ownsPhone(phone) || isOps();
+      allow write: if false; // Admin SDK only
+    }
+
+    // ── USER NOTIFICATIONS (server-written; owner reads/marks-read) ─
+    match /user_notifications/{phone}/items/{notifId} {
+      allow read:   if ownsPhone(phone);
+      allow update: if ownsPhone(phone); // mark read:true only (validate in tests)
+      allow create, delete: if false;    // server-only
+    }
+
+    // ── DEFAULT DENY ───────────────────────────────────────
+    match /{document=**} { allow read, write: if false; }
+  }
+}
