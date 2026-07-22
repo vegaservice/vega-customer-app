@@ -495,48 +495,10 @@ const SHADOW = {
 // Subscription bookings get the built-in 10% — no promo stacking on top.
 // Wallet credit DOES still apply on top of the promo discount.
 // ═══════════════════════════════════════════════════════════════════════
-const PROMOS = {
-  // ─── 1st order (new user, lifetime once) ───
-  'WELCOME50': {
-    type:'pct', val:50, maxCap:200, minOrder:99,
-    firstOrderOnly:true, maxUsesPerUser:1,
-    label:'50% off your first order · max ₹200',
-  },
-  // Backwards-compat alias (existing marketing material still says VEGA50)
-  'VEGA50': {
-    type:'pct', val:50, maxCap:200, minOrder:99,
-    firstOrderOnly:true, maxUsesPerUser:1,
-    label:'50% off first order · max ₹200',
-  },
-
-  // ─── 2nd order (returning customer, lifetime once) ───
-  'COMEBACK30': {
-    type:'pct', val:30, maxCap:150, minOrder:99,
-    ordersRange:[1,1], maxUsesPerUser:1,
-    label:'30% off your second booking · max ₹150',
-  },
-
-  // ─── Loyal customer monthly (3+ bookings) ───
-  'LOYAL15': {
-    type:'pct', val:15, maxCap:100, minOrder:99,
-    minOrders:2, maxUsesPerMonth:1,
-    label:'15% off · once a month · max ₹100',
-  },
-
-  // ─── Anyone, daily one-tap ───
-  'DAILY10': {
-    type:'pct', val:10, maxCap:75, minOrder:99,
-    maxUsesPerDay:1,
-    label:'10% off · once a day · max ₹75',
-  },
-
-  // ─── Vizag launch special (anyone, lifetime once) ───
-  'VIZAG20': {
-    type:'pct', val:20, maxCap:100, minOrder:99,
-    maxUsesPerUser:1,
-    label:'20% off · Vizag launch special · max ₹100',
-  },
-};
+// 22-Jul-2026 PROFIT-FIRST: all promo codes removed per Mahesh — no discounts,
+// prices are already our best. The rules engine (applyPromo/computePromoStatus)
+// is kept intact so codes can be re-added here later if ever needed.
+const PROMOS = {};
 
 // PROFESSIONALS array (Lakshmi Devi, Priya Sharma, etc.) REMOVED — was used
 // to write fake random worker names to bookings at creation. Replaced by
@@ -3915,22 +3877,7 @@ export default function App() {
               ))}
             </Card>
           )}
-          <Card style={{marginBottom:12}}>
-            <Text style={{fontWeight:'700',color:C.text,marginBottom:10}}>🎟️ Promo Code</Text>
-            <View style={{flexDirection:'row',gap:10}}>
-              <TextInput style={[S.inp,{flex:1,marginBottom:0,paddingVertical:10,borderRadius:20}]} placeholder="WELCOME50 · COMEBACK30 · DAILY10" placeholderTextColor={C.muted2} value={promoCode} onChangeText={setPromoCode} autoCapitalize="characters"/>
-              <TouchableOpacity style={{backgroundColor:C.orange,borderRadius:20,paddingHorizontal:16,alignItems:'center',justifyContent:'center',...SHADOW.glow}} onPress={applyPromo}>
-                <Text style={{color:'#FFF',fontWeight:'700',fontSize:13}}>Apply</Text>
-              </TouchableOpacity>
-            </View>
-            {appliedPromo&&(
-              <View style={{backgroundColor:C.greenBg,borderRadius:10,padding:8,marginTop:8,flexDirection:'row',justifyContent:'space-between',borderWidth:0.5,borderColor:C.greenBd}}>
-                <Text style={{color:C.green,fontWeight:'600',fontSize:12}}>✅ {appliedPromo.label}</Text>
-                <TouchableOpacity onPress={()=>{setAppliedPromo(null);setPromoCode('');}}><Text style={{color:C.red,fontSize:12}}>Remove</Text></TouchableOpacity>
-              </View>
-            )}
-            <Text style={{color:C.muted,fontSize:11,marginTop:8}}>Try: WELCOME50 | COMEBACK30 | DAILY10 | VIZAG20</Text>
-          </Card>
+          {/* Promo Code entry removed 22-Jul (profit-first — no promo codes). */}
           <TouchableOpacity style={{backgroundColor:C.goldSolid,borderRadius:20,padding:14,marginBottom:12,flexDirection:'row',alignItems:'center',borderWidth:0.5,borderColor:C.goldBd}} onPress={()=>setUseWallet(w=>!w)}>
             <View style={{width:42,height:42,borderRadius:14,backgroundColor:C.goldBd,alignItems:'center',justifyContent:'center',marginRight:12}}><Text style={{fontSize:20}}>💰</Text></View>
             <View style={{flex:1}}>
@@ -5276,6 +5223,13 @@ export default function App() {
             </View>
           </View>
 
+          {items.length === 0 && (
+            <View style={{backgroundColor:C.card,borderRadius:22,padding:24,alignItems:'center',borderWidth:0.5,borderColor:C.border2,...SHADOW.soft}}>
+              <Text style={{fontSize:40,marginBottom:10}}>🏷️</Text>
+              <DText style={{fontWeight:'800',color:C.text,fontSize:17,marginBottom:6,textAlign:'center'}}>Honest prices, every day</DText>
+              <Text style={{color:C.muted,fontSize:13,textAlign:'center',lineHeight:20}}>No promo codes needed — our prices are already the best we can offer. Subscribe monthly to save 10% automatically, or refer a friend to earn wallet credit.</Text>
+            </View>
+          )}
           {items.map(({ code, promo, meta, status }, idx) => {
             const isBest = idx === firstEligibleIdx && status.eligible;
             const cardOpacity = status.eligible ? 1 : 0.62;
