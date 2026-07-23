@@ -259,58 +259,11 @@ const submitBookingRating = async (orderId, userId, rating, note) => {
 //   • Cannot self-refer (same phone)
 //   • Cannot apply twice (referralApplied flag on this user)
 //   • Both users credited ₹200 + audit transactions logged
-const REFERRAL_BONUS = 200;
+// 22-Jul-2026: Referral programme DISCONTINUED (profit-first — no referral bonus).
+const REFERRAL_BONUS = 0;
 const applyReferralCode = async (myPhone, code) => {
-  try {
-    const cleanCode = (code || '').trim().toUpperCase();
-    if (!cleanCode) return { ok: false, error: 'no_code' };
-    if (cleanCode.length < 4) return { ok: false, error: 'too_short' };
-
-    // 1. Look up the sharer by referralCode
-    const q = await firestore().collection('users')
-      .where('referralCode', '==', cleanCode).limit(1).get();
-    if (q.empty) return { ok: false, error: 'invalid_code' };
-
-    const sharerDoc = q.docs[0];
-    const sharerPhone = sharerDoc.id;
-    if (sharerPhone === myPhone) return { ok: false, error: 'self_referral' };
-
-    // 2. Check this user hasn't already applied a referral
-    const me = await getUser(myPhone);
-    if (!me) return { ok: false, error: 'user_missing' };
-    if (me.referralApplied) return { ok: false, error: 'already_applied' };
-
-    // 3. Credit both users in a transaction (atomic)
-    await firestore().runTransaction(async (tx) => {
-      const sRef = firestore().collection('users').doc(sharerPhone);
-      const mRef = firestore().collection('users').doc(myPhone);
-      const sSnap = await tx.get(sRef);
-      const mSnap = await tx.get(mRef);
-      const sBal  = (sSnap.data() || {}).walletBalance || 0;
-      const mBal  = (mSnap.data() || {}).walletBalance || 0;
-      tx.update(sRef, {
-        walletBalance: sBal + REFERRAL_BONUS,
-        referralCount: ((sSnap.data() || {}).referralCount || 0) + 1,
-      });
-      tx.update(mRef, {
-        walletBalance: mBal + REFERRAL_BONUS,
-        referralApplied: true,
-        referredBy: sharerPhone,
-        referredAt: firestore.FieldValue.serverTimestamp(),
-      });
-    });
-
-    // 4. Audit log (best-effort, outside transaction)
-    try {
-      await logWalletTransaction(sharerPhone, REFERRAL_BONUS, `referral_bonus:${myPhone}`, 'credit');
-      await logWalletTransaction(myPhone,    REFERRAL_BONUS, `referral_signup:${sharerPhone}`, 'credit');
-    } catch (_) {}
-
-    return { ok: true, sharerPhone, bonus: REFERRAL_BONUS };
-  } catch (e) {
-    console.error('applyReferralCode:', e);
-    return { ok: false, error: 'server_error', message: e.message };
-  }
+  // Referral rewards removed. No credit is given to anyone.
+  return { ok: false, error: 'disabled' };
 };
 
 const validatePromoCode = async (code) => {
@@ -817,7 +770,8 @@ const HOME_PACKAGES = [
   },
 ];
 const getDates=()=>{const D=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'],M=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'],t=new Date();return Array.from({length:7},(_,i)=>{const d=new Date(t);d.setDate(t.getDate()+i);const iso=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;return{label:i===0?'Today':i===1?'Tomorrow':D[d.getDay()],num:d.getDate(),mon:M[d.getMonth()],iso};});};
-const TIMES=['8:00 AM','9:00 AM','10:00 AM','11:00 AM','12:00 PM','1:00 PM','2:00 PM','3:00 PM','4:00 PM','5:00 PM','6:00 PM'];
+// 22-Jul: booking slots restricted to 9 AM – 5 PM only (no early-morning / evening slots).
+const TIMES=['9:00 AM','10:00 AM','11:00 AM','12:00 PM','1:00 PM','2:00 PM','3:00 PM','4:00 PM','5:00 PM'];
 
 // ════════════════════════════════════════════════════════════════
 // PREMIUM REUSABLE COMPONENTS
@@ -1845,17 +1799,14 @@ export default function App() {
               await createOrUpdateUser(ph, {
                 name: 'Customer',
                 phone: ph,
-                walletBalance: isFreshAfterDeletion ? 0 : 200,
+                walletBalance: 0,          // 22-Jul: joining bonus removed
                 referralCode: refCode,
                 totalBookings: 0,
-                signupBonusGiven: !isFreshAfterDeletion,
+                signupBonusGiven: true,    // never credit a joining bonus
                 createdAt: new Date().toISOString(),
                 restoredFromAuth: true,
                 previouslyDeleted: wasPreviouslyDeleted,
               });
-              if (!isFreshAfterDeletion) {
-                await logWalletTransaction(ph, 200, 'signup_bonus_heal', 'credit');
-              }
               existingUser = await getUser(ph);
             }
 
@@ -2418,27 +2369,9 @@ export default function App() {
         // Bug 2 RACE FIX: Use Firestore transaction to read+write atomically.
         // Without this, double-tap on Verify causes double-credit.
         if(!existingUser.signupBonusGiven){
-          let credited = false;
-          try {
-            await firestore().runTransaction(async (txn) => {
-              const ref = firestore().collection('users').doc(phone);
-              const snap = await txn.get(ref);
-              if (!snap.exists) return;            // race: doc deleted
-              const data = snap.data();
-              if (data.signupBonusGiven) return;   // already credited by another tab
-              const newBal = (data.walletBalance || 0) + 200;
-              txn.update(ref, {
-                walletBalance: newBal,
-                signupBonusGiven: true,
-              });
-              walletBal = newBal;
-              credited = true;
-            });
-            if (credited) await logWalletTransaction(phone, 200, 'signup_bonus', 'credit');
-          } catch (e) {
-            console.error('signup bonus txn:', e);
-            // Don't block login; user can retry by logging out/in
-          }
+          // 22-Jul: joining bonus removed — mark as given, credit nothing.
+          try { await createOrUpdateUser(phone, { signupBonusGiven: true }); }
+          catch (e) { console.error('mark signupBonusGiven:', e); }
         }
 
         finalUser = {
@@ -2471,19 +2404,19 @@ export default function App() {
         // Bug 2 FIX: signupBonusGiven flag prevents double-credit if this
         // code path ever runs twice (race conditions, network retries).
         const refCode = 'VG'+Math.random().toString(36).substr(2,5).toUpperCase();
-        finalUser = {name:uname||'Customer',phone:`+91${phone}`,code:refCode,walletBalance:200};
+        // 22-Jul: joining bonus removed — new users start with ₹0 wallet.
+        finalUser = {name:uname||'Customer',phone:`+91${phone}`,code:refCode,walletBalance:0};
         await createOrUpdateUser(phone,{
           name: uname || 'Customer',
           phone: phone,
-          walletBalance: 200,
+          walletBalance: 0,
           referralCode: refCode,
           totalBookings: 0,
-          signupBonusGiven: true,        // ← Bug 2: mark bonus as given
+          signupBonusGiven: true,        // mark true so no heal path ever credits
           createdAt: new Date().toISOString(),
         });
-        await logWalletTransaction(phone, 200, 'signup_bonus', 'credit');
         setUser(finalUser);
-        setWallet(200);
+        setWallet(0);
 
         const unsub2 = firestore().collection('bookings')
           .where('customerPhone','==',phone)
@@ -2500,7 +2433,7 @@ export default function App() {
         registerCustomerFCM(phone);
         setLoading(false);
         setScreen('main');setTab('home');
-        Alert.alert('🪷 Welcome!',`Namaste ${uname||'Customer'}!\n🎁 ₹200 wallet bonus added!`);
+        Alert.alert('🪷 Welcome to VEGA!',`Namaste ${uname||'Customer'}! Let's get your home sparkling.`);
       }
     }catch(err){
       setLoading(false);
@@ -4130,16 +4063,7 @@ export default function App() {
                 onChangeText={setNameInput}
                 autoFocus
               />
-              <Text style={{fontWeight:'700',fontSize:14,color:C.text,marginBottom:4}}>🎁 Have a referral code?</Text>
-              <Text style={{color:C.muted,fontSize:12,marginBottom:8}}>Optional — enter your friend's code. Both of you get ₹200!</Text>
-              <TextInput
-                style={{borderWidth:1,borderColor:C.border,borderRadius:14,padding:14,fontSize:15,color:C.text,marginBottom:14,letterSpacing:3,fontWeight:'700',textTransform:'uppercase'}}
-                placeholder="VG12345"
-                value={referralInput}
-                onChangeText={t=>setReferralInput(t.toUpperCase().replace(/[^A-Z0-9]/g,''))}
-                autoCapitalize="characters"
-                maxLength={10}
-              />
+              {/* Referral code entry removed 22-Jul (no referral programme) */}
               <View style={{flexDirection:'row',gap:10}}>
                 <TouchableOpacity style={{flex:1,padding:14,borderRadius:14,borderWidth:1,borderColor:C.border,alignItems:'center'}} onPress={()=>{setShowNameModal(false);setReferralInput('');}}>
                   <Text style={{color:C.muted,fontWeight:'600'}}>Later</Text>
@@ -5355,35 +5279,21 @@ export default function App() {
                 </View>
               </View>
               <Card style={{marginBottom:12}}>
-                <DText style={{fontWeight:'700',color:C.text,fontSize:16,marginBottom:8}}>🎁 Refer & Earn ₹200</DText>
-                <Text style={{color:C.muted,fontSize:13,marginBottom:12,lineHeight:19}}>Share your code. Both you and friend each get ₹200!</Text>
-                <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center',backgroundColor:C.orangeBg,borderRadius:14,padding:14,borderWidth:0.5,borderColor:C.orangeBd}}>
-                  <DText style={{color:C.orange,fontSize:20,fontWeight:'700',letterSpacing:4}}>{user.code}</DText>
-                  <TouchableOpacity style={{backgroundColor:C.orange,paddingHorizontal:16,paddingVertical:10,borderRadius:20,...SHADOW.glow}} onPress={async()=>{
-                    try {
-                      await Share.share({
-                        message:
-                          `🪷 Try VEGA Home Services!\n\n`+
-                          `Home cleaning, bathroom cleaning, car washing — done by trained pros in Visakhapatnam.\n\n`+
-                          `Use my referral code: ${user.code}\n`+
-                          `You get ₹200, I get ₹200 — both win!\n\n`+
-                          `Install: https://play.google.com/store/apps/details?id=com.vegavizag.app`,
-                        title: 'Try VEGA Home Services',
-                      });
-                    } catch (e) { /* user cancelled — that's fine */ }
-                  }}>
-                    <Text style={{color:'#FFF',fontWeight:'700',fontSize:13}}>Share</Text>
-                  </TouchableOpacity>
-                </View>
-                {/* Allow existing users (who skipped the first-time modal) to enter a friend's code */}
-                {!user.referralApplied && (
-                  <TouchableOpacity
-                    style={{marginTop:12,padding:12,borderWidth:1,borderColor:C.orangeBd,borderRadius:14,alignItems:'center',backgroundColor:'#FFF'}}
-                    onPress={()=>{ setProfileRefCode(''); setShowReferralPrompt(true); }}
-                  >
-                    <Text style={{color:C.orange,fontWeight:'700',fontSize:13}}>Have a friend's code? Enter it here →</Text>
-                  </TouchableOpacity>
-                )}
+                <DText style={{fontWeight:'700',color:C.text,fontSize:16,marginBottom:8}}>📣 Loved VEGA? Tell your neighbours</DText>
+                <Text style={{color:C.muted,fontSize:13,marginBottom:12,lineHeight:19}}>Trusted home services in your area — share VEGA with friends & family.</Text>
+                <TouchableOpacity style={{backgroundColor:C.orange,paddingHorizontal:16,paddingVertical:12,borderRadius:20,alignItems:'center',...SHADOW.glow}} onPress={async()=>{
+                  try {
+                    await Share.share({
+                      message:
+                        `🪷 Try VEGA Home Services!\n\n`+
+                        `Home cleaning, bathroom cleaning, car washing — done by trained pros in Visakhapatnam.\n\n`+
+                        `Book on the app: https://play.google.com/store/apps/details?id=com.vegavizag.app`,
+                      title: 'Try VEGA Home Services',
+                    });
+                  } catch (e) { /* user cancelled — that's fine */ }
+                }}>
+                  <Text style={{color:'#FFF',fontWeight:'700',fontSize:13}}>Share VEGA</Text>
+                </TouchableOpacity>
               </Card>
             </>
           )}
